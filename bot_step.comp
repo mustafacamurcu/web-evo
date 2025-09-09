@@ -1,0 +1,58 @@
+const L1 = 16;
+const L2 = 32;
+const L3 = 16;
+
+// struct Brain {
+// 	X: array<f32, L1>,
+// 	Y: array<f32, L2>,
+// 	Z: array<f32, L3>,
+// 	W1: array<f32, L1*L2>,
+// 	B1: array<f32, L2>,
+// 	W2: array<f32, L2*L3>,
+// 	B2: array<f32, L3>,
+// }
+
+struct Bot {
+  position: vec2f,
+  velocity: vec2f,
+  energy: f32,
+};
+
+@group(0) @binding(0) var<storage, read> in_bots: array<Bot>;
+@group(0) @binding(1) var<storage, read_write> out_bots: array<Bot>;
+@group(0) @binding(2) var<storage, read> foods: array<vec2f>;
+@group(0) @binding(3) var<storage, read> spikes: array<vec2f>;
+// @group(0) @binding(4) var<storage, read_write> brains: array<Brain>;
+
+@compute @workgroup_size(64) fn main(
+	@builtin(global_invocation_id) id: vec3u,
+	@builtin(num_workgroups) counts: vec3u
+) {
+	let count = counts.x*64;
+
+	out_bots[id.x].energy = in_bots[id.x].energy;
+	for (var i: u32 = 0; i < 100; i = i + 1) {
+		// distance to food
+		if (length(foods[i] - in_bots[id.x].position) < 0.02) {
+			out_bots[id.x].energy = out_bots[id.x].energy + 0.1;
+		}
+	}
+
+	for (var i: u32 = 0; i < 100; i = i + 1) {
+		// distance to spikes
+		if (length(spikes[i] - in_bots[id.x].position) < 0.02) {
+			out_bots[id.x].energy = out_bots[id.x].energy - 0.1;
+		}
+	}
+
+	out_bots[id.x].velocity = normalize(out_bots[id.x].velocity) * 0.001;
+	out_bots[id.x].position = in_bots[id.x].position + in_bots[id.x].velocity;
+
+	// Bounce off walls
+	if (out_bots[id.x].position.x < -1.0 || out_bots[id.x].position.x > 1.0) {
+		out_bots[id.x].velocity.x = -out_bots[id.x].velocity.x;
+	}
+	if (out_bots[id.x].position.y < -1.0 || out_bots[id.x].position.y > 1.0) {
+		out_bots[id.x].velocity.y = -out_bots[id.x].velocity.y;
+	}
+}

@@ -1,0 +1,28 @@
+const L1 = 16;
+const L2 = 32;
+const L3 = 16;
+
+struct Bot {
+  position: vec2f,
+  velocity: vec2f,
+  energy: f32,
+};
+
+struct Orientation {
+	position : vec2f,
+	direction : vec2f,
+}
+
+@group(0) @binding(0) var<storage, read> bots: array<Bot>;
+// @group(0) @binding(1) var<storage, read> foods: array<vec2f>;
+// @group(0) @binding(2) var<storage, read> spikes: array<vec2f>;
+
+@group(0) @binding(3) var<storage, read_write> orientations: array<Orientation>;
+
+
+@compute @workgroup_size(1) fn main(
+	@builtin(global_invocation_id) id: vec3u
+) {
+	orientations[id.x].position = bots[id.x].position;
+	orientations[id.x].direction = normalize(bots[id.x].velocity);
+}

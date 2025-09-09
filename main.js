@@ -1,6 +1,7 @@
 import {
 	makeShaderDataDefinitions,
 	makeStructuredView,
+	getSizeAndAlignmentOfUnsizedArrayElement
 } from 'https://greggman.github.io/webgpu-utils/dist/2.x/webgpu-utils.module.js';
 
 
@@ -10,48 +11,13 @@ async function fetchShaderCode(url) {
 	return await response.text();
 }
 
-async function main() {
-	const computeShaderCode = await fetchShaderCode('shader.comp');
-	const renderShaderCode = await fetchShaderCode('shader.render');
-	const adapter = await navigator.gpu?.requestAdapter();
-	const device = await adapter?.requestDevice();
-	if (!device) {
-		fail('need a browser that supports WebGPU');
-		return;
-	}
-	const canvas = document.querySelector('canvas');
-	const context = canvas.getContext('webgpu');
+function createRenderPipeline(device, code, context) {
 	const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 	context.configure({
 		device,
 		format: presentationFormat,
 	});
-
-
-
-	// Initial bot data
-	const bot_count = 100;
-	let bot_data = [];
-	for (let i = 0; i < bot_count; ++i) {
-		let bot = {
-			position: [2 * (Math.random() - 0.5), 2 * (Math.random() - 0.5), 0, 0],
-			velocity: [0.02 * (Math.random() - 0.5), 0.02 * (Math.random() - 0.5), 0, 0],
-			score: 0,
-		}
-		bot_data.push(bot);
-	}
-	const defs = makeShaderDataDefinitions(computeShaderCode);
-	const botsView = makeStructuredView(defs.storages.in_bots);
-	const botsViewSize = botsView.arrayBuffer.byteLength;
-	console.log('botsViewSize', botsViewSize);
-
-	botsView.set(bot_data);
-
-
-	const renderModule = device.createShaderModule({
-		label: 'our hardcoded red triangle shaders',
-		code: renderShaderCode,
-	});
+	const renderModule = device.createShaderModule({ code });
 
 	const renderPipeline = device.createRenderPipeline({
 		layout: 'auto',
@@ -59,27 +25,26 @@ async function main() {
 			module: renderModule,
 			buffers: [
 				{
-					// instanced particles buffer
-					arrayStride: botsViewSize / bot_count,
+					arrayStride: 16, // position + direction = 16 bytes
 					stepMode: 'instance',
 					attributes: [
 						{
-							// instance position
+							// bot position
 							shaderLocation: 0,
 							offset: 0,
 							format: 'float32x2',
 						},
 						{
-							// instance velocity
+							// bot direction
 							shaderLocation: 1,
-							offset: 4 * 4,
+							offset: 8,
 							format: 'float32x2',
 						},
 					],
 				},
 				{
 					// vertex buffer
-					arrayStride: 2 * 4,
+					arrayStride: 8,
 					stepMode: 'vertex',
 					attributes: [
 						{
@@ -106,7 +71,6 @@ async function main() {
 	});
 
 	const renderPassDescriptor = {
-		label: 'our basic canvas renderPass',
 		colorAttachments: [
 			{
 				// view: <- to be filled out when we render
@@ -117,7 +81,7 @@ async function main() {
 		],
 	};
 
-	const vertexBufferData = new Float32Array([
+	const vertexBufferData = new Float32Array([ // long triangle
 		-0.01, -0.02, 0.01,
 		-0.02, 0.0, 0.02,
 	]);
@@ -130,38 +94,96 @@ async function main() {
 	new Float32Array(spriteVertexBuffer.getMappedRange()).set(vertexBufferData);
 	spriteVertexBuffer.unmap();
 
-	const computeModule = device.createShaderModule({
-		label: 'doubling compute module',
-		code: computeShaderCode,
+	return { renderPipeline, renderPassDescriptor, spriteVertexBuffer };
+}
+
+function createStorageBuffer(device, storageDefinition, objectCount, usage, data) {
+	const objectSize = getSizeAndAlignmentOfUnsizedArrayElement(storageDefinition).size;
+	const totalSize = objectSize * objectCount;
+	const structuredView = makeStructuredView(storageDefinition, new ArrayBuffer(totalSize));
+	const buffer = device.createBuffer({
+		size: totalSize,
+		usage: GPUBufferUsage.STORAGE | usage,
 	});
 
-	const computePipeline = device.createComputePipeline({
-		label: 'doubling compute pipeline',
+	if (data) {
+		structuredView.set(data);
+		device.queue.writeBuffer(buffer, 0, structuredView.arrayBuffer);
+	}
+	return buffer;
+}
+
+
+function createBotsBuffers(device, defs) {
+	let bot_data = [];
+	for (let i = 0; i < bot_count; ++i) {
+		let bot = {
+			position: [2 * (Math.random() - 0.5), 2 * (Math.random() - 0.5)],
+			velocity: [0.00002 * (Math.random() - 0.5), 0.00002 * (Math.random() - 0.5)],
+			energy: 0,
+		}
+		bot_data.push(bot);
+	}
+
+	var buffers = new Array(2);
+	for (let i = 0; i < 2; ++i) {
+		buffers[i] = createStorageBuffer(device, defs.storages.in_bots, bot_count,
+			GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+			bot_data);
+	}
+
+	return buffers;
+}
+
+function createFoodsBuffer(device, defs) {
+	let food_data = [];
+	for (let i = 0; i < food_count; ++i) {
+		food_data.push(2 * (Math.random() - 0.5));
+		food_data.push(2 * (Math.random() - 0.5));
+	}
+	return createStorageBuffer(device, defs.storages.foods, food_count,
+		GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX,
+		food_data);
+}
+
+function createSpikesBuffer(device, defs) {
+	let spike_data = [];
+	for (let i = 0; i < spike_count; ++i) {
+		spike_data.push(2 * (Math.random() - 0.5));
+		spike_data.push(2 * (Math.random() - 0.5));
+	}
+	return createStorageBuffer(device, defs.storages.spikes, spike_count,
+		GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX,
+		spike_data);
+}
+
+function createComputePipeline(device, code) {
+	const botStepperModule = device.createShaderModule({
+		label: 'bot stepper compute module',
+		code,
+	});
+
+	const botStepperPipeline = device.createComputePipeline({
+		label: 'bot stepper compute pipeline',
 		layout: 'auto',
 		compute: {
-			module: computeModule,
+			module: botStepperModule,
 		},
 	});
 
-	// ping-pong buffers for bot data
-	const botsBuffers = new Array(2);
-	for (let i = 0; i < 2; ++i) {
-		botsBuffers[i] = device.createBuffer({
-			label: 'work buffer',
-			size: botsViewSize,
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX,
-		});
 
-	}
+	const defs = makeShaderDataDefinitions(code);
 
-	device.queue.writeBuffer(botsBuffers[0], 0, botsView.arrayBuffer);
+	// Create Buffers
+	const botsBuffers = createBotsBuffers(device, defs);
+	const foodsBuffer = createFoodsBuffer(device, defs);
+	const spikesBuffer = createSpikesBuffer(device, defs);
 
-	// Setup a bindGroup to tell the shader which
-	// buffer to use for the computation
+	// Bind Groups
 	const botsBindGroups = new Array(2);
 	for (let i = 0; i < 2; ++i) {
 		botsBindGroups[i] = device.createBindGroup({
-			layout: computePipeline.getBindGroupLayout(0),
+			layout: botStepperPipeline.getBindGroupLayout(0),
 			entries: [
 				{
 					binding: 0,
@@ -175,11 +197,91 @@ async function main() {
 						buffer: botsBuffers[(i + 1) % 2],
 					},
 				},
+				{
+					binding: 2,
+					resource: {
+						buffer: foodsBuffer,
+					},
+				},
+				{
+					binding: 3,
+					resource: {
+						buffer: spikesBuffer,
+					},
+				},
 			],
 		});
 	}
 
-	let step = 0;
+	return { botStepperPipeline, botsBuffers, foodsBuffer, spikesBuffer, botsBindGroups };
+}
+
+function createVerticesPipeline(device, code, botsBuffer, foodsBuffer, spikesBuffer) {
+	const verticesModule = device.createShaderModule({
+		label: 'make vertices compute module',
+		code,
+	});
+	const verticesPipeline = device.createComputePipeline({
+		label: 'make vertices compute pipeline',
+		layout: 'auto',
+		compute: {
+			module: verticesModule,
+		},
+	});
+
+
+	const defs = makeShaderDataDefinitions(code);
+
+	const verticesBuffer = createStorageBuffer(device, defs.storages.orientations, bot_count,
+		GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+		null);
+
+	// Bind Groups
+	const verticesBindGroup = device.createBindGroup({
+		layout: verticesPipeline.getBindGroupLayout(0),
+		entries: [
+			{
+				binding: 0,
+				resource: {
+					buffer: botsBuffer,
+				},
+			},
+			{
+				binding: 3,
+				resource: {
+					buffer: verticesBuffer,
+				},
+			}
+		],
+	});
+
+	return { verticesPipeline, verticesBuffer, verticesBindGroup };
+}
+
+
+// Constants
+const bot_count = 64 * 10;
+const food_count = 100;
+const spike_count = 100;
+
+async function main() {
+	// WebGPU setup
+	const adapter = await navigator.gpu?.requestAdapter();
+	const device = await adapter?.requestDevice();
+	const canvas = document.querySelector('canvas');
+	const context = canvas.getContext('webgpu');
+
+	// Bot Stepper Compute Pipeline
+	const computeShaderCode = await fetchShaderCode('bot_step.comp');
+	const { botStepperPipeline, botsBuffers, foodsBuffer, spikesBuffer, botsBindGroups } = createComputePipeline(device, computeShaderCode);
+
+	// Vertex Creation Compute Pipeline
+	const verticesShaderCode = await fetchShaderCode('make_vertices.comp');
+	const { verticesPipeline, verticesBuffer, verticesBindGroup } = createVerticesPipeline(device, verticesShaderCode, botsBuffers[0], foodsBuffer, spikesBuffer);
+
+	// Render Pipeline
+	const renderShaderCode = await fetchShaderCode('shader.render');
+	const { renderPipeline, renderPassDescriptor, spriteVertexBuffer } = createRenderPipeline(device, renderShaderCode, context);
 
 	let paused = false;
 	window.addEventListener('keydown', (e) => {
@@ -189,46 +291,63 @@ async function main() {
 		}
 	});
 
-	function frame() {
+	const fpsElem = document.getElementById('fps');
+	const msElem = document.getElementById('ms');
+
+	// Has to be at least 2 to ping-pong
+	const repeat = 10;
+	async function frame() {
 		if (paused) return;
 		let startTime = performance.now();
+
+		// Step the computation many times
+		const encoder = device.createCommandEncoder({});
+		for (let i = 0; i < repeat; ++i) {
+			const pass = encoder.beginComputePass({});
+			pass.setPipeline(botStepperPipeline);
+			pass.setBindGroup(0, botsBindGroups[i % 2]);
+			pass.dispatchWorkgroups(bot_count / 64);
+			pass.end();
+		}
+
+		let computeCommandBuffer = encoder.finish();
+		device.queue.submit([computeCommandBuffer]);
+		await device.queue.onSubmittedWorkDone();
+		let endTime = performance.now();
+
+		const ms_per_step = (endTime - startTime) / repeat;
+		const sec_per_step = ms_per_step / 1000.0;
+		// const fps = endTime - startTime;
+		const ips = 1 / sec_per_step;
+		fpsElem.textContent = `IPS: ${ips.toFixed(1)}`;
+		msElem.textContent = `ms: ${ms_per_step.toFixed(1)}`;
+
+
+		// make vertices
+		const renderEncoder = device.createCommandEncoder({});
+		const verticesPass = renderEncoder.beginComputePass({});
+		verticesPass.setPipeline(verticesPipeline);
+		verticesPass.setBindGroup(0, verticesBindGroup);
+		verticesPass.dispatchWorkgroups(bot_count);
+		verticesPass.end();
+
+		// render
 		renderPassDescriptor.colorAttachments[0].view = context
 			.getCurrentTexture()
 			.createView();
-		// Encode commands to do the computation
-		const encoder = device.createCommandEncoder({
-			label: 'doubling encoder',
-		});
-		const pass = encoder.beginComputePass({
-			label: 'doubling compute pass',
-		});
-		pass.setPipeline(computePipeline);
-		pass.setBindGroup(0, botsBindGroups[step % 2]);
-		pass.dispatchWorkgroups(100);
-		pass.end();
+		const renderPass = renderEncoder.beginRenderPass(renderPassDescriptor);
+		renderPass.setPipeline(renderPipeline);
+		renderPass.setVertexBuffer(0, verticesBuffer);
+		renderPass.setVertexBuffer(1, spriteVertexBuffer);
+		renderPass.draw(3, bot_count);
+		renderPass.end();
 
-		const passEncoder = encoder.beginRenderPass(renderPassDescriptor);
-		passEncoder.setPipeline(renderPipeline);
-		passEncoder.setVertexBuffer(0, botsBuffers[(step + 1) % 2]);
-		passEncoder.setVertexBuffer(1, spriteVertexBuffer);
-		passEncoder.draw(3, bot_count);
-		passEncoder.end();
-
-		const commandBuffer = encoder.finish();
-
-		device.queue.submit([commandBuffer]);
-		step++;
-
-		const endTime = performance.now();
-
-		const durationMilliseconds = endTime - startTime;
-		const durationSeconds = durationMilliseconds / 1000;
+		const renderCommandBuffer = renderEncoder.finish();
+		device.queue.submit([renderCommandBuffer]);
 		requestAnimationFrame(frame);
 	}
 
 	requestAnimationFrame(frame);
-
-	await device.queue.onSubmittedWorkDone();
 }
 
 main();
