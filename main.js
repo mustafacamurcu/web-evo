@@ -4,11 +4,14 @@ import {
 	getSizeAndAlignmentOfUnsizedArrayElement
 } from 'https://greggman.github.io/webgpu-utils/dist/2.x/webgpu-utils.module.js';
 
-
+// also imports structs.wgsl by default
 async function fetchShaderCode(url) {
+	const structs = await fetch('structs.wgsl');
 	const response = await fetch(url);
 	if (!response.ok) throw new Error('Failed to load shader');
-	return await response.text();
+	const code = await response.text();
+	const structsCode = await structs.text();
+	return structsCode + '\n' + code;
 }
 
 function createRenderPipeline(device, code, context) {
@@ -294,8 +297,9 @@ async function main() {
 	const fpsElem = document.getElementById('fps');
 	const msElem = document.getElementById('ms');
 
+	let lastStatsUpdate = 0;
 	// Has to be at least 2 to ping-pong
-	const repeat = 10;
+	const repeat = 1000;
 	async function frame() {
 		if (paused) return;
 		let startTime = performance.now();
@@ -317,11 +321,14 @@ async function main() {
 
 		const ms_per_step = (endTime - startTime) / repeat;
 		const sec_per_step = ms_per_step / 1000.0;
-		// const fps = endTime - startTime;
 		const ips = 1 / sec_per_step;
-		fpsElem.textContent = `IPS: ${ips.toFixed(1)}`;
-		msElem.textContent = `ms: ${ms_per_step.toFixed(1)}`;
 
+		// Only update stats once per second
+		if (endTime - lastStatsUpdate > 1000) {
+			fpsElem.textContent = `IPS: ${ips.toFixed(1)}`;
+			msElem.textContent = `ms: ${ms_per_step.toFixed(1)}`;
+			lastStatsUpdate = endTime;
+		}
 
 		// make vertices
 		const renderEncoder = device.createCommandEncoder({});

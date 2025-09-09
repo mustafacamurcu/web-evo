@@ -1,13 +1,3 @@
-const L1 = 16;
-const L2 = 32;
-const L3 = 16;
-
-struct Bot {
-  position: vec2f,
-  velocity: vec2f,
-  energy: f32,
-};
-
 struct Orientation {
 	position : vec2f,
 	direction : vec2f,

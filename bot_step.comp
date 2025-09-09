@@ -3,20 +3,11 @@ const L2 = 32;
 const L3 = 16;
 
 // struct Brain {
-// 	X: array<f32, L1>,
-// 	Y: array<f32, L2>,
-// 	Z: array<f32, L3>,
 // 	W1: array<f32, L1*L2>,
 // 	B1: array<f32, L2>,
 // 	W2: array<f32, L2*L3>,
 // 	B2: array<f32, L3>,
 // }
-
-struct Bot {
-  position: vec2f,
-  velocity: vec2f,
-  energy: f32,
-};
 
 @group(0) @binding(0) var<storage, read> in_bots: array<Bot>;
 @group(0) @binding(1) var<storage, read_write> out_bots: array<Bot>;
@@ -29,6 +20,20 @@ struct Bot {
 	@builtin(num_workgroups) counts: vec3u
 ) {
 	let count = counts.x*64;
+
+	// Use threads for MatMul
+	// Each workgroup handles one bot
+	// 64 Threads split the work of calculating the brain
+	// There are N steps of calculation
+	// 1. Input + B1 (16)
+	// 2. * W1 (16*32)
+	// 3. + B2 (32)
+	// 4. * W2 (32*16)
+	// Each step of calculation is split across the 64 threads
+	// At the end of each step, sync threads using workgroupBarrier()
+	// Use shared memory to store intermediate results
+	// shared memory size is at least 8KB usually, should fit
+
 
 	out_bots[id.x].energy = in_bots[id.x].energy;
 	for (var i: u32 = 0; i < 100; i = i + 1) {
@@ -45,7 +50,7 @@ struct Bot {
 		}
 	}
 
-	out_bots[id.x].velocity = normalize(out_bots[id.x].velocity) * 0.001;
+	out_bots[id.x].velocity = normalize(out_bots[id.x].velocity) * 0.00001;
 	out_bots[id.x].position = in_bots[id.x].position + in_bots[id.x].velocity;
 
 	// Bounce off walls
