@@ -179,7 +179,6 @@ async function main() {
 		});
 	}
 
-	console.log(performance.now());
 	let step = 0;
 
 	let paused = false;
@@ -230,7 +229,6 @@ async function main() {
 	requestAnimationFrame(frame);
 
 	await device.queue.onSubmittedWorkDone();
-	console.log(performance.now());
 }
 
 main();
