@@ -1,0 +1,74 @@
+// GEMINI COLOR MAGIC
+fn hue_to_rgb(h: f32) -> vec3<f32> {
+    let r = abs(h * 6.0 - 3.0) - 1.0;
+    let g = 2.0 - abs(h * 6.0 - 2.0);
+    let b = 2.0 - abs(h * 6.0 - 4.0);
+    return saturate(vec3<f32>(r, g, b));
+}
+fn fmod(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
+fn radian_to_rgb(angle_rad: f32) -> vec3<f32> {
+    // Normalize the angle to a [0, 1] range for the hue.
+    // The angle is in radians, so divide by `2.0 * PI`.
+    // The `fract` function gets the fractional part, keeping the value in [0, 1].
+    let PI = 3.14159265359;
+    var hue = fract(angle_rad / (2.0 * PI));
+    
+    // An alternative using a custom modulo for safety with negative angles.
+    // fn fmod(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
+    // var hue = fmod(angle_rad, 2.0 * PI) / (2.0 * PI);
+    // if (hue < 0.0) { hue = 1.0 + hue; }
+
+    // Use a fixed saturation and value of 1.0 for a vibrant color.
+    let s = 1.0;
+    let v = 1.0;
+    
+    let C = s; // Chroma
+    let X = C * (1.0 - abs(fmod(hue * 6.0, 2.0) - 1.0));
+    let m = v - C;
+    
+    var rgb_prime = vec3<f32>(0.0);
+    
+    if (hue < 1.0 / 6.0) {
+        rgb_prime = vec3<f32>(C, X, 0.0);
+    } else if (hue < 2.0 / 6.0) {
+        rgb_prime = vec3<f32>(X, C, 0.0);
+    } else if (hue < 3.0 / 6.0) {
+        rgb_prime = vec3<f32>(0.0, C, X);
+    } else if (hue < 4.0 / 6.0) {
+        rgb_prime = vec3<f32>(0.0, X, C);
+    } else if (hue < 5.0 / 6.0) {
+        rgb_prime = vec3<f32>(X, 0.0, C);
+    } else {
+        rgb_prime = vec3<f32>(C, 0.0, X);
+    }
+    
+    return rgb_prime + vec3<f32>(m);
+}
+
+struct VertexOutput {
+  @builtin(position) position : vec4f,
+  @location(4) color : vec4f,
+}
+
+@vertex
+fn vert_main(
+  @location(0) a_particlePos : vec4f,
+  @location(1) a_particleVel : vec4f,
+  @location(2) a_pos : vec2f
+) -> VertexOutput {
+  let angle = -atan2(a_particleVel.x, a_particleVel.y);
+  let pos = vec2(
+    (a_pos.x * cos(angle)) - (a_pos.y * sin(angle)),
+    (a_pos.x * sin(angle)) + (a_pos.y * cos(angle))
+  );
+  
+  var output : VertexOutput;
+  output.position = vec4(pos + a_particlePos.xy, 0.0, 1.0);
+  output.color = vec4(radian_to_rgb(angle),1.0);
+  return output;
+}
+
+@fragment
+fn frag_main(@location(4) color : vec4f) -> @location(0) vec4f {
+  return color;
+}
