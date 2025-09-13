@@ -54,17 +54,27 @@ struct VertexOutput {
 fn vert_main(
   @location(0) a_particlePos : vec2f,
   @location(1) a_particleVel : vec2f,
-  @location(2) a_pos : vec2f
+  @location(2) a_pos : vec2f,
+  @location(3) a_dsb : u32,
+  @location(4) a_age : u32
 ) -> VertexOutput {
   let angle = -atan2(a_particleVel.x, a_particleVel.y);
   let pos = vec2(
     (a_pos.x * cos(angle)) - (a_pos.y * sin(angle)),
     (a_pos.x * sin(angle)) + (a_pos.y * cos(angle))
   );
+
+  if (a_dsb == 0u) {
+    // Dead bot, move offscreen
+    var output : VertexOutput;
+    output.position = vec4(-100.0, -100.0, 0.0, 1.0);
+    output.color = vec4(0.0,0.0,0.0,0.0);
+    return output;
+  }
   
   var output : VertexOutput;
   output.position = vec4(pos + a_particlePos.xy, 0.0, 1.0);
-  output.color = vec4(radian_to_rgb(angle),1.0);
+  output.color = vec4(radian_to_rgb(f32(a_age)*0.0001),1.0);
   return output;
 }
 

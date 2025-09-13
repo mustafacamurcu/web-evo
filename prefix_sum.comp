@@ -1,0 +1,80 @@
+const N_THREADS = 64;
+
+
+@group(0) @binding(0) var<storage, read> scratchBuffer: array<Bot>;
+@group(0) @binding(1) var<storage, read_write> l1Buffer: array<u32>;
+@group(0) @binding(2) var<storage, read_write> l2Buffer: array<u32>;
+@group(0) @binding(3) var<storage, read_write> l3Buffer: array<u32>;
+
+var<workgroup> prefix_sum_tree: array<u32, N_THREADS>;
+
+// Prefix sum but buffers hold the inclusive sum, so we need to add the original values at the end
+
+fn prefix_sum(t_id: u32) {
+	var offset: u32 = 1;
+	for (var level_size: u32 = N_THREADS/2; level_size > 0; level_size = level_size / 2) {
+		workgroupBarrier();
+		if (t_id < level_size) {
+			let l = offset*(2u*t_id + 1u) - 1u;
+			let r = offset*(2u*t_id + 2u) - 1u;
+			prefix_sum_tree[r] = prefix_sum_tree[r] + prefix_sum_tree[l];
+		}
+		offset = offset * 2u;
+	}
+
+	if (t_id == 0) {
+		prefix_sum_tree[N_THREADS-1] = 0;
+	}
+	
+	// Down-sweep phase
+	for (var d:u32 = 1; d < N_THREADS; d = d * 2) {
+		offset = offset / 2;
+		workgroupBarrier();
+		if (t_id < d) {
+			let l = offset*(2*t_id + 1) - 1;
+			let r = offset*(2*t_id + 2) - 1;
+
+			let t = prefix_sum_tree[l];
+			prefix_sum_tree[l] = prefix_sum_tree[r];
+			prefix_sum_tree[r] = t + prefix_sum_tree[r];
+		}
+	}
+	workgroupBarrier();
+}
+
+@compute @workgroup_size(N_THREADS) fn l1(
+	@builtin(global_invocation_id) global_id: vec3u,
+	@builtin(local_invocation_id) local_id: vec3u
+) {
+	let t_id = local_id.x;
+
+	prefix_sum_tree[t_id] = scratchBuffer[global_id.x].die_stay_breed;
+	prefix_sum(t_id);
+
+	l1Buffer[global_id.x] = prefix_sum_tree[t_id] + scratchBuffer[global_id.x].die_stay_breed;
+}
+
+@compute @workgroup_size(N_THREADS) fn l2(
+	@builtin(global_invocation_id) global_id: vec3u,
+	@builtin(local_invocation_id) local_id: vec3u
+) {
+	let t_id = local_id.x;
+
+	prefix_sum_tree[t_id] = l1Buffer[global_id.x*N_THREADS + N_THREADS - 1];
+	prefix_sum(t_id);
+
+	l2Buffer[global_id.x] = prefix_sum_tree[t_id] + l1Buffer[global_id.x*N_THREADS + N_THREADS - 1];
+}
+
+@compute @workgroup_size(N_THREADS) fn l3(
+	@builtin(global_invocation_id) global_id: vec3u,
+	@builtin(local_invocation_id) local_id: vec3u
+) {
+	let t_id = local_id.x;
+
+	prefix_sum_tree[t_id] = l2Buffer[global_id.x*N_THREADS + N_THREADS - 1];
+	prefix_sum(t_id);
+
+	l3Buffer[global_id.x] = prefix_sum_tree[t_id] + l2Buffer[global_id.x*N_THREADS + N_THREADS - 1];
+}
+

@@ -1,0 +1,51 @@
+// Reaper pass: copies bots from scratchBuffer to botsBuffer using prefix sums
+
+@group(0) @binding(0) var<storage, read> scratchBuffer: array<Bot>;
+@group(0) @binding(1) var<storage, read_write> botsBuffer: array<Bot>;
+@group(0) @binding(2) var<storage, read> l1Buffer: array<u32>;
+@group(0) @binding(3) var<storage, read> l2Buffer: array<u32>;
+@group(0) @binding(4) var<storage, read> l3Buffer: array<u32>;
+
+
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+    let bot_id = id.x;
+    let bot = &scratchBuffer[bot_id];
+    let flag = bot.die_stay_breed;
+
+    let total_bots = l3Buffer[63u];
+
+    // clear bots buffer beyond total_bots
+    if (id.x >= total_bots) {
+        botsBuffer[bot_id].die_stay_breed = 0u; // Mark as dead
+    }
+
+		if (flag == 0) { // Die
+			return;
+		}
+
+    var out_idx = 0u;
+
+    if (bot_id > 0u) {
+      out_idx += l1Buffer[bot_id - 1u];
+    }
+
+    if (bot_id > 64u) {
+      out_idx += l2Buffer[(bot_id-1u) / 64u - 1];
+    }
+
+    if (bot_id > 64u * 64u) {
+      out_idx += l3Buffer[(bot_id-1u) / (64u * 64u) - 1];
+    }
+
+		botsBuffer[out_idx] = *bot;
+    
+		if (flag == 2) { // Breed
+      botsBuffer[out_idx].age = 0;
+      botsBuffer[out_idx + 1] = *bot;
+      botsBuffer[out_idx + 1].id = bot.id + 1000000u;
+      botsBuffer[out_idx + 1].die_stay_breed = 1u;
+      botsBuffer[out_idx + 1].age = 0;
+      botsBuffer[out_idx + 1].velocity.x = bot.velocity.x*sqrt(3.0)/2.0 - bot.velocity.y*0.5;
+      botsBuffer[out_idx + 1].velocity.y = bot.velocity.x*0.5 + bot.velocity.y*sqrt(3.0)/2.0;
+    }
+}

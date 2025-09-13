@@ -9,17 +9,19 @@ const L3 = 16;
 // 	B2: array<f32, L3>,
 // }
 
-@group(0) @binding(0) var<storage, read> in_bots: array<Bot>;
-@group(0) @binding(1) var<storage, read_write> out_bots: array<Bot>;
-@group(0) @binding(2) var<storage, read> foods: array<vec2f>;
-@group(0) @binding(3) var<storage, read> spikes: array<vec2f>;
+@group(0) @binding(0) var<storage, read> bots: array<Bot>;
+@group(0) @binding(1) var<storage, read_write> scratchBuffer: array<Bot>;
 // @group(0) @binding(4) var<storage, read_write> brains: array<Brain>;
 
 @compute @workgroup_size(64) fn main(
 	@builtin(global_invocation_id) id: vec3u,
 	@builtin(num_workgroups) counts: vec3u
 ) {
-	let count = counts.x*64;
+	if (bots[id.x].die_stay_breed == 0) {
+		// Dead bot, do nothing
+		scratchBuffer[id.x] = bots[id.x];
+		return;
+	}
 
 	// Use threads for MatMul
 	// Each workgroup handles one bot
@@ -34,30 +36,29 @@ const L3 = 16;
 	// Use shared memory to store intermediate results
 	// shared memory size is at least 8KB usually, should fit
 
+	var bot: Bot = bots[id.x];
+	bot.age = bot.age + 1;
 
-	out_bots[id.x].energy = in_bots[id.x].energy;
-	for (var i: u32 = 0; i < 100; i = i + 1) {
-		// distance to food
-		if (length(foods[i] - in_bots[id.x].position) < 0.02) {
-			out_bots[id.x].energy = out_bots[id.x].energy + 0.1;
+	bot.velocity = normalize(bots[id.x].velocity) * 0.0001;
+	bot.position = bots[id.x].position + bot.velocity;
+
+
+	bot.die_stay_breed = 1;
+
+	// Bounce off walls with epsilon to avoid floating point errors
+	let epsilon = 0.001;
+	if ((bot.position.x < -1.0 + epsilon || bot.position.x > 1.0 - epsilon)
+			&& sign(bot.velocity.x) == sign(bot.position.x)) {
+		bot.velocity.x = -bot.velocity.x;
+		bot.die_stay_breed = 0;
+	}
+	if ((bot.position.y < -1.0 + epsilon || bot.position.y > 1.0 - epsilon)
+		&& sign(bot.velocity.y) == sign(bot.position.y)) {
+		bot.velocity.y = -bot.velocity.y;
+		if (bot.age > 100) {
+			bot.die_stay_breed = 2;
 		}
 	}
 
-	for (var i: u32 = 0; i < 100; i = i + 1) {
-		// distance to spikes
-		if (length(spikes[i] - in_bots[id.x].position) < 0.02) {
-			out_bots[id.x].energy = out_bots[id.x].energy - 0.1;
-		}
-	}
-
-	out_bots[id.x].velocity = normalize(out_bots[id.x].velocity) * 0.00001;
-	out_bots[id.x].position = in_bots[id.x].position + in_bots[id.x].velocity;
-
-	// Bounce off walls
-	if (out_bots[id.x].position.x < -1.0 || out_bots[id.x].position.x > 1.0) {
-		out_bots[id.x].velocity.x = -out_bots[id.x].velocity.x;
-	}
-	if (out_bots[id.x].position.y < -1.0 || out_bots[id.x].position.y > 1.0) {
-		out_bots[id.x].velocity.y = -out_bots[id.x].velocity.y;
-	}
+	scratchBuffer[id.x] = bot;
 }

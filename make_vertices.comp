@@ -4,15 +4,16 @@ struct Orientation {
 }
 
 @group(0) @binding(0) var<storage, read> bots: array<Bot>;
-// @group(0) @binding(1) var<storage, read> foods: array<vec2f>;
-// @group(0) @binding(2) var<storage, read> spikes: array<vec2f>;
-
-@group(0) @binding(3) var<storage, read_write> orientations: array<Orientation>;
+@group(0) @binding(1) var<storage, read_write> orientations: array<Orientation>;
 
 
-@compute @workgroup_size(1) fn main(
+@compute @workgroup_size(64) fn main(
 	@builtin(global_invocation_id) id: vec3u
 ) {
+	if (bots[id.x].die_stay_breed == 0) { // draw dead bots offscreen
+		orientations[id.x].position = vec2f(-100.0, -100.0);
+		return;
+	}
 	orientations[id.x].position = bots[id.x].position;
 	orientations[id.x].direction = normalize(bots[id.x].velocity);
 }
