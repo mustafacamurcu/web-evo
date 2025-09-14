@@ -7,13 +7,66 @@
 			background: #222;
 			color: #fff;
 		}
+
+		#stats {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-start;
+			position: absolute;
+			left: 20px;
+			top: 20px;
+			gap: 4px;
+			background: rgba(0, 0, 0, 0.7);
+			padding: 12px 18px;
+			border-radius: 10px;
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+		}
+
+		.stat-avg {
+			color: #4fc3f7;
+		}
+
+		.stat-tot {
+			color: #ffd54f;
+		}
+
+		.stat-min {
+			color: #81c784;
+		}
+
+		.stat-med {
+			color: #ba68c8;
+		}
+
+		.stat-max {
+			color: #e57373;
+		}
+
+		.stat-n {
+			color: #bdbdbd;
+		}
 	</style>
 </head>
 
 <body>
 	<canvas width="900" height="900"></canvas>
-	<span id="fps" style="margin-left: 20px; font-family: monospace; font-size: 1.2em;"></span>
-	<span id="ms" style="margin-left: 20px; font-family: monospace; font-size: 1.2em;"></span>
+	<div id="stats">
+		<span id="fps" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="ms" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="repeatCount" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="stepTime" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="stepToPrefix1Gap" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="prefix1Time" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="prefix1ToPrefix2Gap" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="prefix2Time" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="prefix2ToPrefix3Gap" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="prefix3Time" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="prefix3ToReaperGap" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="reaperTime" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="computeTime" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="renderTime" style="font-family: monospace; font-size: 1.2em;"></span>
+		<span id="totalTime" style="font-family: monospace; font-size: 1.2em;"></span>
+	</div>
 	<script type="module" src="./main.js"></script>
 </body>
 

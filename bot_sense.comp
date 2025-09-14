@@ -1,0 +1,80 @@
+@group(0) @binding(0) var<storage, read> bots: array<Brain>;
+@group(0) @binding(1) var<storage, read_write> bot_senses: array<BotSenses>;
+
+const N_RAYS = 8;
+const FOV = 3.14159265 / 2.0; // 90 degrees
+const RAY_FOV = FOV / f32(N_RAYS);
+const VISION_DISTANCE = 0.1;
+
+var<workgroup> rays: array<BotSense, 64>;
+
+fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
+    let cross_product = v1.x * v2.y - v1.y * v2.x;
+    let dot_product = dot(v1, v2);
+
+    return atan2(cross_product, dot_product);
+}
+
+
+@compute @workgroup_size(64) fn main(
+	@builtin(global_invocation_id) global_id: vec3u,
+	@builtin(local_invocation_id) local_id: vec3u,
+	@builtin(workgroup_id) workgroup_id: vec3u
+) {
+	let bot_id = workgroup_id.x;
+
+	if (bots[bot_id].die_stay_breed == 0) {
+		// Dead bot, do nothing
+		return;
+	}
+
+	let t_id = local_id.x;
+	let num_bots = arrayLength(&bots);
+
+	// 8 threads per each of 8 rays
+	// For each ray, 8 threads look through bots in parallel
+	// Each thread keeps track of closest bot it found
+	let ray_id = t_id / N_RAYS;
+	let thread_count = 64u / N_RAYS;
+	let ray_thread_id = t_id % thread_count;
+	let ray_angle_start = -FOV / 2.0 + f32(ray_id) * RAY_FOV;
+	let ray_angle_end = ray_angle_start + RAY_FOV;
+
+	let bot_dir = normalize(bots[bot_id].velocity);
+	let min_ray = BotSense(VISION_DISTANCE, 0u); // Large distance, no type
+	for (var i = ray_thread_id; i < num_bots; i = i + thread_count) {
+		if (i == bot_id) {
+			continue;
+		}
+		let to_other = bots[i].position - bots[bot_id].position;
+		let dist = length(to_other);
+		if (dist > VISION_DISTANCE) {
+			continue; // Too far
+		}
+		let to_other_dir = normalize(to_other);
+		let angle = get_signed_angle(bot_dir, to_other_dir);
+		if (angle < ray_angle_start || angle > ray_angle_end) {
+			continue; // Out of this ray
+		}
+		if (dist < min_ray.min_dist) {
+			min_ray = BotSense(dist, 1u); // Found closer bot, type 1 for now
+		}
+	}
+
+	// Each thread found its closest bot in its ray
+	rays[t_id] = min_ray;
+	workgroupBarrier();
+
+	// Now we reduce within the ray to find the closest bot
+	if (ray_thread_id < N_RAYS) {
+		let ray_offset = ray_thread_id * thread_count;
+		let min_min_ray: BotSense = rays[ray_offset];
+		for(var i = 1u; i < thread_count; i = i + 1u) {
+			if (rays[ray_offset + i].min_dist < min_min_ray.min_dist) {
+				min_min_ray = rays[ray_offset + i];
+			}
+		}
+		bot_senses[bot_id].senses[ray_id] = min_min_ray;
+	}
+
+}

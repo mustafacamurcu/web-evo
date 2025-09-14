@@ -1,5 +1,7 @@
-@group(0) @binding(0) var<storage, read> bots: array<Bot>;
-@group(0) @binding(1) var<storage, read_write> scratchBuffer: array<Bot>;
+@group(0) @binding(0) var<storage, read_write> bots: array<Brain>;
+@group(0) @binding(1) var<storage, read> bots: array<Bot>;
+@group(0) @binding(2) var<storage, read_write> scratchBuffer: array<Bot>;
+// @group(0) @binding(4) var<storage, read_write> brains: array<Brain>;
 
 @compute @workgroup_size(64) fn main(
 	@builtin(global_invocation_id) id: vec3u,
