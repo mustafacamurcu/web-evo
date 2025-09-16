@@ -5,6 +5,7 @@
 @group(0) @binding(2) var<storage, read> l1Buffer: array<u32>;
 @group(0) @binding(3) var<storage, read> l2Buffer: array<u32>;
 @group(0) @binding(4) var<storage, read> l3Buffer: array<u32>;
+@group(0) @binding(5) var<storage, read_write> num_bots: array<u32,3>;
 
 
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -12,7 +13,12 @@
     let bot = &scratchBuffer[bot_id];
     let flag = bot.die_stay_breed;
 
-    let total_bots = l3Buffer[63u];
+    let total_bots = l3Buffer[9u]; // MAXBOTS = 64 * 64 * 10; L3 has 10 elements
+    if (id.x == 0u) {
+        num_bots[0] = total_bots;
+        num_bots[1] = 1;
+        num_bots[2] = 1;
+    }
 
     // clear bots buffer beyond total_bots
     if (id.x >= total_bots) {

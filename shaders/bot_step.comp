@@ -1,6 +1,8 @@
 @group(0) @binding(0) var<storage, read> bots: array<Bot>;
 @group(0) @binding(1) var<storage, read_write> scratchBuffer: array<Bot>;
 
+// 1 thread per bot
+// 1 workgroup per 64 bots
 @compute @workgroup_size(64) fn main(
 	@builtin(global_invocation_id) id: vec3u,
 	@builtin(num_workgroups) counts: vec3u

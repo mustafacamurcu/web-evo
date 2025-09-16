@@ -1,4 +1,4 @@
-export function createReaperPipeline(device, code, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer) {
+export function createReaperPipeline(device, code, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer, numBotsBuffer) {
 	const module = device.createShaderModule({ code, });
 	const pipeline = device.createComputePipeline({
 		layout: 'auto',
@@ -40,6 +40,12 @@ export function createReaperPipeline(device, code, scratchBuffer, botsBuffer, L1
 					buffer: L3Buffer,
 				},
 			},
+			{
+				binding: 5,
+				resource: {
+					buffer: numBotsBuffer,
+				},
+			}
 		],
 	});
 

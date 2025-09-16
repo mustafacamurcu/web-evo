@@ -115,6 +115,12 @@ async function main() {
 	const verticesBuffer = createStorageBuffer(device, "vertex_datas", botVerticesShaderCode, MAX_BOTS,
 		GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
 
+	const numBotsBuffer = device.createBuffer({
+		size: 3 * 4, // 3 u32 values * 4 bytes/u32 = 12 bytes
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+	});
+	device.queue.writeBuffer(numBotsBuffer, 0, new Uint32Array([INITIAL_BOT_COUNT, 1, 1]));
+
 	const verticesBufferStride = getSizeAndAlignmentOfUnsizedArrayElement(
 		makeShaderDataDefinitions(botVerticesShaderCode).storages["vertex_datas"]
 	).size;
@@ -124,7 +130,7 @@ async function main() {
 	const botSensesPipeline = createBotSensePipeline(device, botSenseShaderCode, botsBuffer, botSensesBuffer);
 	const botStepperPipeline = createBotStepperPipeline(device, botStepShaderCode, botsBuffer, scratchBuffer);
 	const prefixSumPipeline = createPrefixSumPipeline(device, prefixSumShaderCode, L1Buffer, L2Buffer, L3Buffer, scratchBuffer);
-	const reaperPipeline = createReaperPipeline(device, reaperShaderCode, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer);
+	const reaperPipeline = createReaperPipeline(device, reaperShaderCode, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer, numBotsBuffer);
 	const botVerticesPipeline = createBotVerticesPipeline(device, botVerticesShaderCode, botsBuffer, botSensesBuffer, verticesBuffer);
 	const renderPipeline = createRenderPipeline(device, renderShaderCode, context, verticesBufferStride, depthTexture);
 
@@ -199,7 +205,8 @@ async function main() {
 			const sensePass = encoder.beginComputePass(tswrites(base + 0, base + 1));
 			sensePass.setPipeline(botSensesPipeline.pipeline);
 			sensePass.setBindGroup(0, botSensesPipeline.bindGroup);
-			sensePass.dispatchWorkgroups(MAX_BOTS);
+			sensePass.dispatchWorkgroupsIndirect(numBotsBuffer, 0);
+			// sensePass.dispatchWorkgroups(MAX_BOTS);
 			sensePass.end();
 			// Step bots in botsBuffer (with timestamp)
 			const stepPass = encoder.beginComputePass(tswrites(base + 2, base + 3));
@@ -345,6 +352,10 @@ async function main() {
 			else {
 				var bots = await dumpBuffer(device, botsBuffer);
 				var senses = await dumpBufferSense(device, botSensesBuffer);
+				var numBots = await dumpBufferInt(device, numBotsBuffer);
+				console.log('Num bots: ' + numBots[0]);
+				var l3 = await dumpBufferInt(device, L3Buffer);
+				console.log('L3: ' + l3);
 				console.log(bots.slice(0, Math.min(20, INITIAL_BOT_COUNT)));
 				console.log(senses.slice(0, Math.min(20, INITIAL_BOT_COUNT)));
 				for (var j = 0; j < Math.min(20, INITIAL_BOT_COUNT); j++) {
