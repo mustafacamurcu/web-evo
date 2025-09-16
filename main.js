@@ -41,12 +41,11 @@ function createStorageBuffer(device, storageDefinitionName, code, objectCount, u
 
 // Constants
 const MAX_BOTS = 64 * 64 * 10; // increase by adding a level to prefix sum
-const INITIAL_BOT_COUNT = 20;
-const PASSES = 5; // step, prefix1, prefix2, prefix3, reaper
+const INITIAL_BOT_COUNT = 2000;
+const PASSES = 6; // sense, step, prefix1, prefix2, prefix3, reaper
 const QUERIES_PER_PASS = 2;
-const repeat = 20 // or your chosen repeat value
-const timestampSampleCount = 100;
-const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * timestampSampleCount + 2; // +2 for render pass
+const REPEAT = 100;
+const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * REPEAT + 2 + 2; // +2 for vertices, +2 for render
 
 async function main() {
 	// WebGPU setup
@@ -141,14 +140,17 @@ async function main() {
 	const fpsElem = document.getElementById('fps');
 	const ipsElem = document.getElementById('ms');
 	// Use the renderTime span from HTML
-	const renderTimeElem = document.getElementById('renderTime');
 	const prefix1TimeElem = document.getElementById('prefix1Time');
 	const prefix2TimeElem = document.getElementById('prefix2Time');
 	const prefix3TimeElem = document.getElementById('prefix3Time');
 	const reaperTimeElem = document.getElementById('reaperTime');
+	const senseTimeElem = document.getElementById('senseTime');
 	const stepTimeElem = document.getElementById('stepTime');
 	const repeatCountElem = document.getElementById('repeatCount');
+	const botCountElem = document.getElementById('botCount');
 	const computeTimeElem = document.getElementById('computeTime');
+	const vertexTimeElem = document.getElementById('vertexTime');
+	const renderTimeElem = document.getElementById('renderTime');
 	const totalTimeElem = document.getElementById('totalTime');
 
 	// WebGPU timestamp query setup
@@ -174,50 +176,61 @@ async function main() {
 		}
 	}
 
-
+	let timestamp_enabled = true;
+	function tswrites(start, end) {
+		if (!timestamp_enabled) return {};
+		return {
+			timestampWrites: {
+				querySet: timestampQuerySet,
+				beginningOfPassWriteIndex: start,
+				endOfPassWriteIndex: end,
+			}
+		};
+	}
 
 	async function frame() {
 		if (paused) return;
 
 		// Step the computation many times
 		const encoder = device.createCommandEncoder({});
-		for (let i = 0; i < repeat; ++i) {
+		for (let i = 0; i < REPEAT; ++i) {
+			let base = i * PASSES * 2;
 			// Calculate bot senses
-			const sensePass = encoder.beginComputePass();
+			const sensePass = encoder.beginComputePass(tswrites(base + 0, base + 1));
 			sensePass.setPipeline(botSensesPipeline.pipeline);
 			sensePass.setBindGroup(0, botSensesPipeline.bindGroup);
 			sensePass.dispatchWorkgroups(MAX_BOTS);
 			sensePass.end();
 			// Step bots in botsBuffer (with timestamp)
-			const stepPass = encoder.beginComputePass();
+			const stepPass = encoder.beginComputePass(tswrites(base + 2, base + 3));
 			stepPass.setPipeline(botStepperPipeline.pipeline);
 			stepPass.setBindGroup(0, botStepperPipeline.bindGroup);
 			stepPass.dispatchWorkgroups(MAX_BOTS / 64);
 			stepPass.end();
 
 			// Prefix1
-			const prefixSumPass1 = encoder.beginComputePass();
+			const prefixSumPass1 = encoder.beginComputePass(tswrites(base + 4, base + 5));
 			prefixSumPass1.setPipeline(prefixSumPipeline.pipeline1);
 			prefixSumPass1.setBindGroup(0, prefixSumPipeline.L1BindGroup);
 			prefixSumPass1.dispatchWorkgroups(MAX_BOTS / 64);
 			prefixSumPass1.end();
 
 			// Prefix2
-			const prefixSumPass2 = encoder.beginComputePass();
+			const prefixSumPass2 = encoder.beginComputePass(tswrites(base + 6, base + 7));
 			prefixSumPass2.setPipeline(prefixSumPipeline.pipeline2);
 			prefixSumPass2.setBindGroup(0, prefixSumPipeline.L2BindGroup);
 			prefixSumPass2.dispatchWorkgroups(MAX_BOTS / 64 / 64);
 			prefixSumPass2.end();
 
 			// Prefix3
-			const prefixSumPass3 = encoder.beginComputePass();
+			const prefixSumPass3 = encoder.beginComputePass(tswrites(base + 8, base + 9));
 			prefixSumPass3.setPipeline(prefixSumPipeline.pipeline3);
 			prefixSumPass3.setBindGroup(0, prefixSumPipeline.L3BindGroup);
 			prefixSumPass3.dispatchWorkgroups(1);
 			prefixSumPass3.end();
 
 			// Reaper
-			const reaperPass = encoder.beginComputePass();
+			const reaperPass = encoder.beginComputePass(tswrites(base + 10, base + 11));
 			reaperPass.setPipeline(reaperPipeline.pipeline);
 			reaperPass.setBindGroup(0, reaperPipeline.bindGroup);
 			reaperPass.dispatchWorkgroups(MAX_BOTS / 64);
@@ -225,7 +238,7 @@ async function main() {
 		}
 
 		// Update bot vertices for rendering
-		const botVerticesPass = encoder.beginComputePass();
+		const botVerticesPass = encoder.beginComputePass(tswrites(REPEAT * PASSES * 2, REPEAT * PASSES * 2 + 1));
 		botVerticesPass.setPipeline(botVerticesPipeline.pipeline);
 		botVerticesPass.setBindGroup(0, botVerticesPipeline.bindGroup);
 		botVerticesPass.dispatchWorkgroups(MAX_BOTS / 64);
@@ -235,6 +248,7 @@ async function main() {
 		renderPipeline.renderPassDescriptor.colorAttachments[0].view = context
 			.getCurrentTexture()
 			.createView();
+		renderPipeline.renderPassDescriptor.timestampWrites = tswrites(REPEAT * PASSES * 2 + 2, REPEAT * PASSES * 2 + 3).timestampWrites;
 
 		const renderPass = encoder.beginRenderPass(renderPipeline.renderPassDescriptor);
 		renderPass.setPipeline(renderPipeline.pipeline);
@@ -244,57 +258,69 @@ async function main() {
 		renderPass.end();
 
 		// Resolve timestamp queries if available
-		// if (timestampQuerySet) {
-		// 	encoder.resolveQuerySet(timestampQuerySet, 0, TOTAL_QUERIES, timestampResolveBuffer, 0);
-		// 	encoder.copyBufferToBuffer(timestampResolveBuffer, 0, timestampStagingBuffer, 0, TOTAL_QUERIES * 8);
-		// }
+		if (timestamp_enabled) {
+			encoder.resolveQuerySet(timestampQuerySet, 0, TOTAL_QUERIES, timestampResolveBuffer, 0);
+			encoder.copyBufferToBuffer(timestampResolveBuffer, 0, timestampStagingBuffer, 0, TOTAL_QUERIES * 8);
+		}
 
 		const commandBuffer = encoder.finish();
 		device.queue.submit([commandBuffer]);
 
-		// // Read and display average pass times if available
-		// await timestampStagingBuffer.mapAsync(GPUMapMode.READ);
-		// const array = new BigUint64Array(timestampStagingBuffer.getMappedRange());
-		// // For each pass, average over all iterations
-		// const passNames = [
-		// 	{ elem: stepTimeElem, label: 'Step', begin: 0, end: 1 },
-		// 	{ elem: prefix1TimeElem, label: 'Prefix1', begin: 2, end: 3 },
-		// 	{ elem: prefix2TimeElem, label: 'Prefix2', begin: 4, end: 5 },
-		// 	{ elem: prefix3TimeElem, label: 'Prefix3', begin: 6, end: 7 },
-		// 	{ elem: reaperTimeElem, label: 'Reaper', begin: 8, end: 9 },
-		// 	{ elem: totalTimeElem, label: 'ComputeTime', begin: 0, end: 9 },
-		// ];
-		// for (let p = 0; p < passNames.length; ++p) {
-		// 	let max = -Infinity;
-		// 	let sum = 0;
-		// 	for (let i = 0; i < timestampSampleCount; ++i) {
-		// 		let base = i * PASSES * 2;
-		// 		const t0 = array[base + passNames[p].begin];
-		// 		const t1 = array[base + passNames[p].end];
-		// 		const time = Number(t1 - t0) * timestampPeriod * 1e-6; // convert nanoseconds to milliseconds
-		// 		sum += time;
-		// 		if (time > max) max = time;
-		// 	}
-		// 	let avg = sum / timestampSampleCount;
-		// 	let adjustedSum = sum * repeat / timestampSampleCount;
-		// 	passNames[p].elem.textContent =
-		// 		`${passNames[p].label}: avg=${avg.toFixed(2)}, tot=${adjustedSum.toFixed(2)}, max=${max.toFixed(2)} ms}`;
-		// }
-		// const tbegin = array[0];
-		// const tend = array[PASSES * 2 * timestampSampleCount + 1];
-		// const totalTime = Number(tend - tbegin) * timestampPeriod * 1e-6;
-		// totalTimeElem.textContent =
-		// 	`Total Time: ${totalTime.toFixed(2)} ms`;
-		// const t0 = array[PASSES * 2 * timestampSampleCount];
-		// const t1 = array[PASSES * 2 * timestampSampleCount + 1];
-		// const renderTime = Number(t1 - t0) * timestampPeriod * 1e-6; // convert nanoseconds to milliseconds
-		// renderTimeElem.textContent =
-		// 	`Render Time: ${renderTime.toFixed(2)} ms`;
+		if (timestamp_enabled) {
+			// Read and display average pass times if available
+			await timestampStagingBuffer.mapAsync(GPUMapMode.READ);
+			const array = new BigUint64Array(timestampStagingBuffer.getMappedRange());
+			// For each pass, average over all iterations
+			const passNames = [
+				{ elem: senseTimeElem, label: 'Sense', begin: 0, end: 1 },
+				{ elem: stepTimeElem, label: 'Step', begin: 2, end: 3 },
+				{ elem: prefix1TimeElem, label: 'Prefix1', begin: 4, end: 5 },
+				{ elem: prefix2TimeElem, label: 'Prefix2', begin: 6, end: 7 },
+				{ elem: prefix3TimeElem, label: 'Prefix3', begin: 8, end: 9 },
+				{ elem: reaperTimeElem, label: 'Reaper', begin: 10, end: 11 },
+				{ elem: totalTimeElem, label: 'ComputeTime', begin: 0, end: 11 },
+			];
+			for (let p = 0; p < passNames.length; ++p) {
+				let max = -Infinity;
+				let sum = 0;
+				for (let i = 0; i < REPEAT; ++i) {
+					let base = i * PASSES * 2;
+					const t0 = array[base + passNames[p].begin];
+					const t1 = array[base + passNames[p].end];
+					const time = Number(t1 - t0) * timestampPeriod * 1e-6; // convert nanoseconds to milliseconds
+					sum += time;
+					if (time > max) max = time;
+				}
+				let avg = sum / REPEAT;
+				passNames[p].elem.textContent =
+					`${passNames[p].label}: avg=${avg.toFixed(2)}, tot=${sum.toFixed(2)}, max=${max.toFixed(2)} ms}`;
+			}
+			const computeBegin = array[0];
+			const computeEnd = array[PASSES * 2 * REPEAT + 3];
+			const computeTime = Number(computeEnd - computeBegin) * timestampPeriod * 1e-6;
+			computeTimeElem.textContent =
+				`Compute Time: ${computeTime.toFixed(2)} ms`;
+			const tbegin = array[0];
+			const tend = array[PASSES * 2 * REPEAT + 3];
+			const totalTime = Number(tend - tbegin) * timestampPeriod * 1e-6;
+			totalTimeElem.textContent =
+				`Total Time: ${totalTime.toFixed(2)} ms`;
+			const vertexBegin = array[PASSES * 2 * REPEAT];
+			const vertexEnd = array[PASSES * 2 * REPEAT + 1];
+			const vertexTime = Number(vertexEnd - vertexBegin) * timestampPeriod * 1e-6; // convert nanoseconds to milliseconds
+			vertexTimeElem.textContent =
+				`Vertex Time: ${vertexTime.toFixed(2)} ms`;
+			const t0 = array[PASSES * 2 * REPEAT + 2];
+			const t1 = array[PASSES * 2 * REPEAT + 3];
+			const renderTime = Number(t1 - t0) * timestampPeriod * 1e-6; // convert nanoseconds to milliseconds
+			renderTimeElem.textContent =
+				`Render Time: ${renderTime.toFixed(2)} ms`;
 
 
-		// timestampStagingBuffer.unmap();
+			timestampStagingBuffer.unmap();
+		}
 		// --- FPS & IPS update ---
-		iterationCount += repeat;
+		iterationCount += REPEAT;
 		frameCount++;
 		const now = performance.now();
 		if (now - lastIPSUpdate > 500) {
@@ -302,7 +328,8 @@ async function main() {
 			fps = Math.round(frameCount * 1000 / (now - lastIPSUpdate));
 			if (fpsElem) fpsElem.textContent = `FPS: ${fps}`;
 			if (ipsElem) ipsElem.textContent = `IPS: ${ips}`;
-			if (repeatCountElem) repeatCountElem.textContent = `Repeat: ${repeat}`;
+			if (repeatCountElem) repeatCountElem.textContent = `Repeat: ${REPEAT}`;
+			if (repeatCountElem) botCountElem.textContent = `Bot Count: ${INITIAL_BOT_COUNT}`;
 			lastIPSUpdate = now;
 			iterationCount = 0;
 			frameCount = 0;
@@ -329,6 +356,9 @@ async function main() {
 					}
 				}
 			}
+		}
+		if (e.code === 'KeyT') {
+			timestamp_enabled = !timestamp_enabled;
 		}
 	});
 
