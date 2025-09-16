@@ -1,0 +1,30 @@
+@group(0) @binding(0) var<storage, read_write> bot_brains: array<Brain>;
+@group(0) @binding(1) var<storage, read> bot_senses: array<BotSenses>;
+@group(0) @binding(2) var<storage, read_write> bots: array<Bot>; 
+
+@compute @workgroup_size(64) fn main(
+	@builtin(global_invocation_id) id: vec3u,
+	@builtin(num_workgroups) counts: vec3u
+) {
+	if (bots[id.x].die_stay_breed == 0) {
+		// Dead bot, do nothing
+		scratchBuffer[id.x] = bots[id.x];
+		return;
+	}
+
+	// Use threads for MatMul
+	// Each workgroup handles one bot
+	// 64 Threads split the work of calculating the brain
+	// There are N steps of calculation
+	// 1. Input + B1 (16)
+	// 2. * W1 (16*32)
+	// 3. + B2 (32)
+	// 4. * W2 (32*16)
+	// Each step of calculation is split across the 64 threads
+	// At the end of each step, sync threads using workgroupBarrier()
+	// Use shared memory to store intermediate results
+	// shared memory size is at least 8KB usually, should fit
+	
+	
+
+}

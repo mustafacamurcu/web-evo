@@ -1,7 +1,5 @@
-@group(0) @binding(0) var<storage, read_write> bots: array<Brain>;
-@group(0) @binding(1) var<storage, read> bots: array<Bot>;
-@group(0) @binding(2) var<storage, read_write> scratchBuffer: array<Bot>;
-// @group(0) @binding(4) var<storage, read_write> brains: array<Brain>;
+@group(0) @binding(0) var<storage, read> bots: array<Bot>;
+@group(0) @binding(1) var<storage, read_write> scratchBuffer: array<Bot>;
 
 @compute @workgroup_size(64) fn main(
 	@builtin(global_invocation_id) id: vec3u,
@@ -13,18 +11,6 @@
 		return;
 	}
 
-	// Use threads for MatMul
-	// Each workgroup handles one bot
-	// 64 Threads split the work of calculating the brain
-	// There are N steps of calculation
-	// 1. Input + B1 (16)
-	// 2. * W1 (16*32)
-	// 3. + B2 (32)
-	// 4. * W2 (32*16)
-	// Each step of calculation is split across the 64 threads
-	// At the end of each step, sync threads using workgroupBarrier()
-	// Use shared memory to store intermediate results
-	// shared memory size is at least 8KB usually, should fit
 
 	var bot: Bot = bots[id.x];
 	bot.age = bot.age + 1;
@@ -40,15 +26,16 @@
 	if ((bot.position.x < -1.0 + epsilon || bot.position.x > 1.0 - epsilon)
 			&& sign(bot.velocity.x) == sign(bot.position.x)) {
 		bot.velocity.x = -bot.velocity.x;
-		bot.die_stay_breed = 0;
+		bot.die_stay_breed = 1;
 	}
 	if ((bot.position.y < -1.0 + epsilon || bot.position.y > 1.0 - epsilon)
 		&& sign(bot.velocity.y) == sign(bot.position.y)) {
 		bot.velocity.y = -bot.velocity.y;
 		if (bot.age > 1000) {
-			bot.die_stay_breed = 2;
+			bot.die_stay_breed = 1;
 		}
 	}
+
 
 	scratchBuffer[id.x] = bot;
 }

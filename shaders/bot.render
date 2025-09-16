@@ -1,0 +1,48 @@
+struct VertexOutput {
+  @builtin(position) position : vec4f,
+  @location(6) color : vec4f,
+}
+
+@vertex
+fn vert_main(
+  @location(0) color : vec4f,
+  @location(1) position : vec2f,
+  @location(2) direction : vec2f,
+  @location(3) vertex_pos : vec2f,
+  @location(4) senses : u32,
+  @location(5) sense_id : u32,
+) -> VertexOutput {
+  if (position.x > 50.0 || position.y > 50.0) {
+    // Offscreen
+    var output : VertexOutput;
+    output.position = vec4(-100.0, -100.0, 0.0, 1.0);
+    output.color = vec4(0.0,0.0,0.0,0.0);
+    return output;
+  }
+
+  let angle = -atan2(direction.x, direction.y);
+  let pos = vec2(
+    (vertex_pos.x * cos(angle)) - (vertex_pos.y * sin(angle)),
+    (vertex_pos.x * sin(angle)) + (vertex_pos.y * cos(angle))
+  );
+
+  var output : VertexOutput;
+  output.position = vec4(pos + position, 0.0, 1.0);
+
+  if (sense_id == 8u) {
+    output.color = color;
+  } else if ((senses & (1u << sense_id)) != 0u) {
+    output.color = vec4(1.0, 0.0, 0.0, 1.0); // Active sense - red
+    output.position.z = 0.1;
+  } else {
+    output.color = vec4(0.5, 0.5, 0.5, 1.0); // Inactive sense - gray
+    output.position.z = 0.1;
+  }
+
+  return output;
+}
+
+@fragment
+fn frag_main(@location(6) color : vec4f) -> @location(0) vec4f {
+  return color;
+}

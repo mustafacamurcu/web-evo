@@ -1,0 +1,25 @@
+@group(0) @binding(0) var<storage, read> bots: array<Bot>;
+@group(0) @binding(1) var<storage, read> bot_senses: array<BotSenses>;
+@group(0) @binding(2) var<storage, read_write> vertex_datas: array<BotVertexData>;
+
+@compute @workgroup_size(64) fn main(
+	@builtin(global_invocation_id) id: vec3u
+) {
+	let bot_id = id.x;
+	if (bots[bot_id].die_stay_breed == 0u) {
+		vertex_datas[bot_id].position = vec2f(12.0, 100.0);
+		vertex_datas[bot_id].direction = vec2f(1.0, 1.0);
+		return;
+	}
+	vertex_datas[id.x].position = bots[id.x].position;
+	vertex_datas[id.x].direction = normalize(bots[id.x].velocity);
+
+  var senses_bitmask = 0u;
+	for (var i = 0u; i < 8; i = i + 1u) {
+		if (bot_senses[bot_id].senses[i].type_id > 0u) {
+			senses_bitmask = senses_bitmask | (1u << i);
+		}
+	}
+	vertex_datas[id.x].active_senses = senses_bitmask;
+	vertex_datas[id.x].color = bots[id.x].color;
+}
