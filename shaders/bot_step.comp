@@ -33,7 +33,7 @@
 	if ((bot.position.y < -1.0 + epsilon || bot.position.y > 1.0 - epsilon)
 		&& sign(bot.velocity.y) == sign(bot.position.y)) {
 		bot.velocity.y = -bot.velocity.y;
-		if (bot.age > 1000) {
+		if (bot.age > 100) {
 			bot.die_stay_breed = 1;
 		}
 	}

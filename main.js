@@ -5,6 +5,7 @@ import {
 } from 'https://greggman.github.io/webgpu-utils/dist/2.x/webgpu-utils.module.js';
 import { createRenderPipeline } from './pipelines/render_pipeline.js';
 import { createBotStepperPipeline } from './pipelines/bot_step_pipeline.js';
+import { createBotDecidePipeline } from './pipelines/bot_decide_pipeline.js';
 import { createPrefixSumPipeline } from './pipelines/prefix_sum_pipeline.js';
 import { createReaperPipeline } from './pipelines/reaper_pipeline.js';
 import { createBotSensePipeline } from './pipelines/bot_sense_pipeline.js';
@@ -40,11 +41,11 @@ function createStorageBuffer(device, storageDefinitionName, code, objectCount, u
 }
 
 // Constants
-const MAX_BOTS = 64 * 64 * 10; // increase by adding a level to prefix sum
-const INITIAL_BOT_COUNT = 2000;
-const PASSES = 6; // sense, step, prefix1, prefix2, prefix3, reaper
+const MAX_BOTS = 64 * 64 * 1; // increase by adding a level to prefix sum
+const INITIAL_BOT_COUNT = 50;
+const PASSES = 7; // sense, decide, step, prefix1, prefix2, prefix3, reaper
 const QUERIES_PER_PASS = 2;
-const REPEAT = 100;
+const REPEAT = 20;
 const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * REPEAT + 2 + 2; // +2 for vertices, +2 for render
 
 async function main() {
@@ -91,8 +92,21 @@ async function main() {
 		}
 	}
 
+	// brain data
+	let brain_data = [];
+	for (let i = 0; i < MAX_BOTS; ++i) {
+		let brain = {
+			w1: new Float32Array(16 * 32).map(() => (Math.random() * 2 - 1) * 0.1),
+			b1: new Float32Array(32).map(() => (Math.random() * 2 - 1) * 0.1),
+			w2: new Float32Array(32 * 16).map(() => (Math.random() * 2 - 1) * 0.1),
+			b2: new Float32Array(16).map(() => (Math.random() * 2 - 1) * 0.1),
+		}
+		brain_data.push(brain);
+	}
+
 	// Load shader codes
 	const botSenseShaderCode = await fetchShaderCode('bot_sense.comp');
+	const botDecideShaderCode = await fetchShaderCode('bot_decide.comp');
 	const botStepShaderCode = await fetchShaderCode('bot_step.comp');
 	const prefixSumShaderCode = await fetchShaderCode('prefix_sum.comp');
 	const reaperShaderCode = await fetchShaderCode('reaper.comp');
@@ -102,6 +116,8 @@ async function main() {
 	// Create buffers
 	const botSensesBuffer = createStorageBuffer(device, 'bot_senses', botSenseShaderCode, MAX_BOTS,
 		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
+	const botBrainsBuffer = createStorageBuffer(device, 'bot_brains', botDecideShaderCode, MAX_BOTS,
+		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST, brain_data);
 	const botsBuffer = createStorageBuffer(device, 'bots', botStepShaderCode, MAX_BOTS,
 		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST, bot_data);
 	const scratchBuffer = createStorageBuffer(device, 'scratchBuffer', botStepShaderCode, MAX_BOTS,
@@ -128,6 +144,7 @@ async function main() {
 
 	// Create pipelines
 	const botSensesPipeline = createBotSensePipeline(device, botSenseShaderCode, botsBuffer, botSensesBuffer);
+	const botDecidePipeline = createBotDecidePipeline(device, botDecideShaderCode, botsBuffer, botBrainsBuffer, botSensesBuffer);
 	const botStepperPipeline = createBotStepperPipeline(device, botStepShaderCode, botsBuffer, scratchBuffer);
 	const prefixSumPipeline = createPrefixSumPipeline(device, prefixSumShaderCode, L1Buffer, L2Buffer, L3Buffer, scratchBuffer);
 	const reaperPipeline = createReaperPipeline(device, reaperShaderCode, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer, numBotsBuffer);
@@ -151,6 +168,7 @@ async function main() {
 	const prefix3TimeElem = document.getElementById('prefix3Time');
 	const reaperTimeElem = document.getElementById('reaperTime');
 	const senseTimeElem = document.getElementById('senseTime');
+	const decideTimeElem = document.getElementById('decideTime');
 	const stepTimeElem = document.getElementById('stepTime');
 	const repeatCountElem = document.getElementById('repeatCount');
 	const botCountElem = document.getElementById('botCount');
@@ -206,38 +224,45 @@ async function main() {
 			sensePass.setPipeline(botSensesPipeline.pipeline);
 			sensePass.setBindGroup(0, botSensesPipeline.bindGroup);
 			sensePass.dispatchWorkgroupsIndirect(numBotsBuffer, 0);
-			// sensePass.dispatchWorkgroups(MAX_BOTS);
 			sensePass.end();
+
+			// Decide bot actions
+			const decidePass = encoder.beginComputePass(tswrites(base + 2, base + 3));
+			decidePass.setPipeline(botDecidePipeline.pipeline);
+			decidePass.setBindGroup(0, botDecidePipeline.bindGroup);
+			decidePass.dispatchWorkgroupsIndirect(numBotsBuffer, 0);
+			decidePass.end();
+
 			// Step bots in botsBuffer (with timestamp)
-			const stepPass = encoder.beginComputePass(tswrites(base + 2, base + 3));
+			const stepPass = encoder.beginComputePass(tswrites(base + 4, base + 5));
 			stepPass.setPipeline(botStepperPipeline.pipeline);
 			stepPass.setBindGroup(0, botStepperPipeline.bindGroup);
 			stepPass.dispatchWorkgroups(MAX_BOTS / 64);
 			stepPass.end();
 
 			// Prefix1
-			const prefixSumPass1 = encoder.beginComputePass(tswrites(base + 4, base + 5));
+			const prefixSumPass1 = encoder.beginComputePass(tswrites(base + 6, base + 7));
 			prefixSumPass1.setPipeline(prefixSumPipeline.pipeline1);
 			prefixSumPass1.setBindGroup(0, prefixSumPipeline.L1BindGroup);
 			prefixSumPass1.dispatchWorkgroups(MAX_BOTS / 64);
 			prefixSumPass1.end();
 
 			// Prefix2
-			const prefixSumPass2 = encoder.beginComputePass(tswrites(base + 6, base + 7));
+			const prefixSumPass2 = encoder.beginComputePass(tswrites(base + 8, base + 9));
 			prefixSumPass2.setPipeline(prefixSumPipeline.pipeline2);
 			prefixSumPass2.setBindGroup(0, prefixSumPipeline.L2BindGroup);
 			prefixSumPass2.dispatchWorkgroups(MAX_BOTS / 64 / 64);
 			prefixSumPass2.end();
 
 			// Prefix3
-			const prefixSumPass3 = encoder.beginComputePass(tswrites(base + 8, base + 9));
+			const prefixSumPass3 = encoder.beginComputePass(tswrites(base + 10, base + 11));
 			prefixSumPass3.setPipeline(prefixSumPipeline.pipeline3);
 			prefixSumPass3.setBindGroup(0, prefixSumPipeline.L3BindGroup);
 			prefixSumPass3.dispatchWorkgroups(1);
 			prefixSumPass3.end();
 
 			// Reaper
-			const reaperPass = encoder.beginComputePass(tswrites(base + 10, base + 11));
+			const reaperPass = encoder.beginComputePass(tswrites(base + 12, base + 13));
 			reaperPass.setPipeline(reaperPipeline.pipeline);
 			reaperPass.setBindGroup(0, reaperPipeline.bindGroup);
 			reaperPass.dispatchWorkgroups(MAX_BOTS / 64);
@@ -280,12 +305,13 @@ async function main() {
 			// For each pass, average over all iterations
 			const passNames = [
 				{ elem: senseTimeElem, label: 'Sense', begin: 0, end: 1 },
-				{ elem: stepTimeElem, label: 'Step', begin: 2, end: 3 },
-				{ elem: prefix1TimeElem, label: 'Prefix1', begin: 4, end: 5 },
-				{ elem: prefix2TimeElem, label: 'Prefix2', begin: 6, end: 7 },
-				{ elem: prefix3TimeElem, label: 'Prefix3', begin: 8, end: 9 },
-				{ elem: reaperTimeElem, label: 'Reaper', begin: 10, end: 11 },
-				{ elem: totalTimeElem, label: 'ComputeTime', begin: 0, end: 11 },
+				{ elem: decideTimeElem, label: 'Decide', begin: 2, end: 3 },
+				{ elem: stepTimeElem, label: 'Step', begin: 4, end: 5 },
+				{ elem: prefix1TimeElem, label: 'Prefix1', begin: 6, end: 7 },
+				{ elem: prefix2TimeElem, label: 'Prefix2', begin: 8, end: 9 },
+				{ elem: prefix3TimeElem, label: 'Prefix3', begin: 10, end: 11 },
+				{ elem: reaperTimeElem, label: 'Reaper', begin: 12, end: 13 },
+				{ elem: totalTimeElem, label: 'ComputeTime', begin: 0, end: 13 },
 			];
 			for (let p = 0; p < passNames.length; ++p) {
 				let max = -Infinity;
@@ -371,6 +397,14 @@ async function main() {
 		if (e.code === 'KeyT') {
 			timestamp_enabled = !timestamp_enabled;
 		}
+		const statsElem = document.getElementById('stats');
+		window.addEventListener('keydown', (e) => {
+			if (e.code === 'KeyH') {
+				if (statsElem) {
+					statsElem.style.display = (statsElem.style.display === 'none') ? '' : 'none';
+				}
+			}
+		});
 	});
 
 	requestAnimationFrame(frame);

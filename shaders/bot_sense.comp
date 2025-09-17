@@ -16,7 +16,6 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 
 // 1 workgroup per bot
 @compute @workgroup_size(64) fn main(
-	@builtin(global_invocation_id) global_id: vec3u,
 	@builtin(local_invocation_id) local_id: vec3u,
 	@builtin(workgroup_id) workgroup_id: vec3u,
 	@builtin(num_workgroups) num_workgroups: vec3u
@@ -58,7 +57,7 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 		// Within fov and distance
 		var ray_id = u32((angle + FOV/2.0) / RAY_FOV);
 		if (dist < thread_senses[t_id].senses[ray_id].distance) {
-			thread_senses[t_id].senses[ray_id] = BotSense(bots[i].id, dist); // Found closer bot
+			thread_senses[t_id].senses[ray_id] = BotSense(1u, dist); // Found closer bot
 		}
 	}
 

@@ -2,29 +2,156 @@
 @group(0) @binding(1) var<storage, read> bot_senses: array<BotSenses>;
 @group(0) @binding(2) var<storage, read_write> bots: array<Bot>; 
 
+// Brain
+var<workgroup> w1: array<f32, 16 * 32>;
+var<workgroup> b1: array<f32, 32>;
+var<workgroup> w2: array<f32, 32 * 16>;
+var<workgroup> b2: array<f32, 16>;
+
+// Intermediate calculations
+var<workgroup> input_layer: array<f32, 16>;
+var<workgroup> multiplied_w1: array<f32, 16 * 32>;
+var<workgroup> added_b1: array<f32, 32>;
+var<workgroup> multiplied_w2: array<f32, 32 * 16>;
+var<workgroup> added_b2: array<f32, 16>;
+
+// 1 workgroup per bot
 @compute @workgroup_size(64) fn main(
-	@builtin(global_invocation_id) id: vec3u,
+	@builtin(local_invocation_id) local_id: vec3u,
+	@builtin(workgroup_id) workgroup_id: vec3u,
 	@builtin(num_workgroups) counts: vec3u
 ) {
-	if (bots[id.x].die_stay_breed == 0) {
-		// Dead bot, do nothing
-		scratchBuffer[id.x] = bots[id.x];
-		return;
+	let bot_id = workgroup_id.x;
+	let t_id = local_id.x;
+
+	// Load brain into shared memory
+	let w1_size = 16u * 32u;
+	let w1_chunk_size = w1_size / 64u;
+	if (t_id < 64u) {
+		let start = t_id * w1_chunk_size;
+		for (var i = 0u; i < w1_chunk_size; i = i + 1u) {
+		    let idx = start + i;
+		    w1[idx] = bot_brains[bot_id].W1[idx];
+		}
 	}
 
-	// Use threads for MatMul
-	// Each workgroup handles one bot
-	// 64 Threads split the work of calculating the brain
-	// There are N steps of calculation
-	// 1. Input + B1 (16)
-	// 2. * W1 (16*32)
-	// 3. + B2 (32)
-	// 4. * W2 (32*16)
-	// Each step of calculation is split across the 64 threads
-	// At the end of each step, sync threads using workgroupBarrier()
-	// Use shared memory to store intermediate results
-	// shared memory size is at least 8KB usually, should fit
-	
-	
+	let b1_size = 32u;
+	if (t_id < 32u) {
+		b1[t_id] = bot_brains[bot_id].B1[t_id];
+	}
 
+	let w2_size = 32u * 16u;
+	let w2_chunk_size = w2_size / 64u;
+	if (t_id < 64u) {
+		let start = t_id * w2_chunk_size;
+		for (var i = 0u; i < w2_chunk_size; i = i + 1u) {
+		    let idx = start + i;
+		    w2[idx] = bot_brains[bot_id].W2[idx];
+		}
+	}
+
+	let b2_size = 16u;
+	if (t_id < 16u) {
+		b2[t_id] = bot_brains[bot_id].B2[t_id];
+	}
+
+	// Load bot senses into shared memory
+	if (t_id < 8u) {
+		input_layer[t_id*2] = bot_senses[bot_id].senses[t_id].distance;
+		if (bot_senses[bot_id].senses[t_id].type_id != 0u) {
+			input_layer[t_id*2+1] = 1.0; // Sees
+		} else {
+			input_layer[t_id*2+1] = 0.0; // Doesn't see
+		}
+	}
+
+	workgroupBarrier();
+
+	// multiply input_layer (16) with w1 (16*32)
+	if (t_id < 32u) {
+		var sum = 0.0;
+		for (var i = 0u; i < 16u; i = i + 1u) {
+			sum += input_layer[i] * w1[i * 32u + t_id];
+		}
+		multiplied_w1[t_id] = sum;
+	}
+
+	workgroupBarrier();
+
+	// add b1 (32)
+	if (t_id < 32u) {
+		added_b1[t_id] = multiplied_w1[t_id] + b1[t_id];
+		// relu
+		if (added_b1[t_id] < 0.0) {
+			added_b1[t_id] = 0.0;
+		}
+	}
+
+	workgroupBarrier();
+
+	// multiply added_b1 (32) with w2 (32*16)
+	if (t_id < 16u) {
+		var sum = 0.0;
+		for (var i = 0u; i < 32u; i = i + 1u) {
+			sum += added_b1[i] * w2[i * 16u + t_id];
+		}
+		multiplied_w2[t_id] = sum;
+	}
+
+	workgroupBarrier();
+
+	// add b2 (16)
+	if (t_id < 16u) {
+		added_b2[t_id] = multiplied_w2[t_id] + b2[t_id];
+		// relu
+		if (added_b2[t_id] < 0.0) {
+			added_b2[t_id] = 0.0;
+		}
+	}
+
+	workgroupBarrier();
+
+	// final decisions
+	if (t_id == 0u) {
+		var mx = added_b2[0];
+		var max_index = 0u;
+    for (var i = 1u; i < 32u; i++) {
+        let cur = added_b2[i];
+        if (cur > mx) {
+            mx = cur;
+            max_index = i;
+        }
+    }
+
+		if (max_index < 8u) {
+			// Move in direction of ray
+			let angle = -3.14159 * 0.5 + (f32(max_index) + 0.5) * (3.14159 / 8.0);
+			let speed = length(bots[bot_id].velocity);
+			bots[bot_id].velocity = vec2(cos(angle), sin(angle)) * speed;
+		} else if (max_index == 8u) {
+			// red
+			bots[bot_id].color = vec4f(1.0, 0.0, 0.0, 1.0);
+		} else if (max_index == 9u) {
+			// blue
+			bots[bot_id].color = vec4f(0.0, 0.0, 1.0, 1.0);
+		} else if (max_index == 10u) {
+			// green
+			bots[bot_id].color = vec4f(0.0, 1.0, 0.0, 1.0);
+		} else if (max_index == 11u) {
+			// yellow
+			bots[bot_id].color = vec4f(1.0, 1.0, 0.0, 1.0);
+		} else if (max_index == 12u) {
+			// cyan
+			bots[bot_id].color = vec4f(0.0, 1.0, 1.0, 1.0);
+		} else if (max_index == 13u) {
+			// magenta
+			bots[bot_id].color = vec4f(1.0, 0.0, 1.0, 1.0);
+		} else if (max_index == 14u) {
+			// white
+			bots[bot_id].color = vec4f(1.0, 1.0, 1.0, 1.0);
+		} else if (max_index == 15u) {
+			// black
+			bots[bot_id].color = vec4f(0.0, 0.0, 0.0, 1.0);
+		}
+	}
 }
