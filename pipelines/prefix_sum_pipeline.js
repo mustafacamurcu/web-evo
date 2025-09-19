@@ -1,4 +1,4 @@
-export function createPrefixSumPipeline(device, code, L1Buffer, L2Buffer, L3Buffer, scratchBuffer) {
+export function createPrefixSumPipeline(device, code, L1Buffer, L2Buffer, L3Buffer, scratchBuffer, numBotsBuffer) {
 	const module = device.createShaderModule({ code, });
 	const pipeline1 = device.createComputePipeline({
 		layout: 'auto',
@@ -73,6 +73,12 @@ export function createPrefixSumPipeline(device, code, L1Buffer, L2Buffer, L3Buff
 				binding: 3,
 				resource: {
 					buffer: L3Buffer,
+				},
+			},
+			{
+				binding: 4,
+				resource: {
+					buffer: numBotsBuffer,
 				},
 			},
 		],

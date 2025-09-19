@@ -5,8 +5,10 @@ struct Bot {
 	die_stay_breed: u32, // 0 = kill, 1 = nothing, 2 = duplicate 
   age: u32,
   energy: f32,
-  id: u32
-};
+  id: u32,
+  decision: u32, // 0-15
+  brain_id: u32,
+}; // 52 bytes size, padded to 64 bytes
 
 struct BotVertexData {
   color: vec4f,

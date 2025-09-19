@@ -5,53 +5,99 @@
 @group(0) @binding(2) var<storage, read> l1Buffer: array<u32>;
 @group(0) @binding(3) var<storage, read> l2Buffer: array<u32>;
 @group(0) @binding(4) var<storage, read> l3Buffer: array<u32>;
-@group(0) @binding(5) var<storage, read_write> num_bots: array<u32,3>;
+@group(0) @binding(5) var<storage, read_write> bot_brains: array<Brain>;
+@group(0) @binding(6) var<storage, read_write> brain_free_list: array<u32>;
+@group(0) @binding(7) var<storage, read_write> brain_free_list_counter: atomic<u32>;
 
+var<workgroup> parent_brain_id: u32;
+var<workgroup> child_brain_id: u32;
+var<workgroup> dsb: u32;
+var<workgroup> out_idx: u32;
 
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
-    let bot_id = id.x;
-    let bot = &scratchBuffer[bot_id];
-    let flag = bot.die_stay_breed;
+// 1 bot per workgroup
+@compute @workgroup_size(64) fn main(
+  @builtin(global_invocation_id) global_id: vec3u,
+  @builtin(local_invocation_id) local_id: vec3u,
+  @builtin(workgroup_id) workgroup_id: vec3u
+) {
+  // only first thread in workgroup does the normal work
+  if (local_id.x == 0) {
+    let bot_id = workgroup_id.x;
+    var bot = scratchBuffer[bot_id];
+    dsb = bot.die_stay_breed;
 
-    let total_bots = l3Buffer[9u]; // MAXBOTS = 64 * 64 * 10; L3 has 10 elements
-    if (id.x == 0u) {
-        num_bots[0] = total_bots;
-        num_bots[1] = 1;
-        num_bots[2] = 1;
+    if (dsb == 0) { // Die
+      // release brain slot
+      let index = atomicAdd(&brain_free_list_counter, 1u);
+      brain_free_list[index] = bot.brain_id;
     }
 
-    // clear bots buffer beyond total_bots
-    if (id.x >= total_bots) {
-        botsBuffer[bot_id].die_stay_breed = 0u; // Mark as dead
+    if (dsb > 0) { // Stay alive
+      if (bot_id > 0u) {
+        out_idx += l1Buffer[bot_id - 1u];
+      }
+
+      if (bot_id > 64u) {
+        out_idx += l2Buffer[(bot_id-1u) / 64u - 1];
+      }
+
+      if (bot_id > 64u * 64u) {
+        out_idx += l3Buffer[(bot_id-1u) / (64u * 64u) - 1];
+      }
+
+      if (out_idx < arrayLength(&botsBuffer)) {
+        botsBuffer[out_idx] = bot;
+      }
     }
 
-		if (flag == 0) { // Die
-			return;
-		}
-
-    var out_idx = 0u;
-
-    if (bot_id > 0u) {
-      out_idx += l1Buffer[bot_id - 1u];
-    }
-
-    if (bot_id > 64u) {
-      out_idx += l2Buffer[(bot_id-1u) / 64u - 1];
-    }
-
-    if (bot_id > 64u * 64u) {
-      out_idx += l3Buffer[(bot_id-1u) / (64u * 64u) - 1];
-    }
-
-		botsBuffer[out_idx] = *bot;
-    
-		if (flag == 2) { // Breed
+    if (dsb == 2 && out_idx+1 < arrayLength(&botsBuffer)) { // Breed
+      // reset parent age
       botsBuffer[out_idx].age = 0;
-      botsBuffer[out_idx + 1] = *bot;
-      botsBuffer[out_idx + 1].id = bot.id + 1000000u;
-      botsBuffer[out_idx + 1].die_stay_breed = 1u;
-      botsBuffer[out_idx + 1].age = 0;
-      botsBuffer[out_idx + 1].velocity.x = bot.velocity.x*sqrt(3.0)/2.0 - bot.velocity.y*0.5;
-      botsBuffer[out_idx + 1].velocity.y = bot.velocity.x*0.5 + bot.velocity.y*sqrt(3.0)/2.0;
+      botsBuffer[out_idx].energy = bot.energy / 2.0;
+      
+      // acquire new brain slot
+      let brain_index = atomicSub(&brain_free_list_counter, 1u) - 1u;
+      child_brain_id= brain_free_list[brain_index];
+      parent_brain_id = bot.brain_id;
+
+      // create child bot
+      var new_bot: Bot = bot;
+      new_bot.id = bot.id + 1000000u;
+      new_bot.die_stay_breed = 1u;
+      new_bot.age = 0;
+      // random position
+      new_bot.position = vec2f((f32((bot.id * 37u) % 100u) / 100.0 - 0.5), (f32((bot.id * 57u) % 100u) / 100.0 - 0.5));
+      new_bot.brain_id = child_brain_id;
+      new_bot.energy = bot.energy;
+      botsBuffer[out_idx + 1] = new_bot;
     }
+  }
+
+  workgroupBarrier();
+  if (dsb == 2 && out_idx+1 < arrayLength(&botsBuffer)) {
+    // all threads in workgroup do the brain copy
+    let t_id = local_id.x;
+    let w1_size = 16u * 32u;
+    let w1_chunk_size = w1_size / 64u;
+    var start = t_id * w1_chunk_size;
+    for (var i = 0u; i < w1_chunk_size; i = i + 1u) {
+        let idx = start + i;
+        bot_brains[child_brain_id].W1[idx] = bot_brains[parent_brain_id].W1[idx];
+    }
+    let b1_size = 32u;
+    if (t_id < 32u) {
+      bot_brains[child_brain_id].B1[t_id] = bot_brains[parent_brain_id].B1[t_id];
+    }
+    let w2_size = 32u * 16u;
+    let w2_chunk_size = w2_size / 64u;
+    start = t_id * w2_chunk_size;
+    for (var i = 0u; i < w2_chunk_size; i = i + 1u) {
+        let idx = start + i;
+        bot_brains[child_brain_id].W2[idx] = bot_brains[parent_brain_id].W2[idx];
+    }
+    let b2_size = 16u;
+    if (t_id < 16u) {
+      bot_brains[child_brain_id].B2[t_id] = bot_brains[parent_brain_id].B2[t_id];
+    }
+  }
 }

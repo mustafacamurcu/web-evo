@@ -103,7 +103,7 @@ export function createRenderPipeline(device, code, context, verticesBufferStride
 		}
 	};
 
-	const scale = 0.07;
+	const scale = 0.05;
 	const rayLen = 0.1;
 	const numRays = 8;
 	const numTriangles = numRays + 1; // 1 for the body

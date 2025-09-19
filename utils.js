@@ -8,6 +8,7 @@ class Bot {
 		this.age = 0;
 		this.energy = 0;
 		this.id = 0;
+		this.decision = 0;
 	}
 }
 
@@ -32,11 +33,11 @@ export async function dumpBuffer(device, buffer) {
 	const data = stagingBuffer.getMappedRange();
 	const view = new DataView(data);
 
-	const numBots = data.byteLength / 48;
+	const numBots = data.byteLength / 64;
 	const bots = [];
 
 	for (let i = 0; i < numBots; i++) {
-		const byteOffset = i * 48;
+		const byteOffset = i * 64;
 		const bot = new Bot();
 
 		bot.color[0] = view.getFloat32(byteOffset + 0, true);
@@ -51,6 +52,7 @@ export async function dumpBuffer(device, buffer) {
 		bot.age = view.getUint32(byteOffset + 36, true);
 		bot.energy = view.getUint32(byteOffset + 40, true);
 		bot.id = view.getUint32(byteOffset + 44, true);
+		bot.decision = view.getUint32(byteOffset + 48, true);
 
 		bots.push(bot);
 	}
@@ -117,6 +119,34 @@ export async function dumpBufferInt(device, buffer) {
 	const u32Array = [];
 	for (let i = 0; i < view.byteLength / 4; i++) {
 		u32Array.push(view.getUint32(i * 4, true)); // The `true` is for little-endian
+	}
+	return u32Array;
+}
+
+export async function dumpBufferFloat(device, buffer) {
+	const stagingBuffer = device.createBuffer({
+		size: buffer.size, // Size must match the source buffer
+		usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+	});
+
+	const encoder = device.createCommandEncoder();
+	encoder.copyBufferToBuffer(
+		buffer, // Source buffer
+		0, // Source offset
+		stagingBuffer, // Destination buffer
+		0, // Destination offset
+		stagingBuffer.size // Size of data to copy
+	);
+	const commands = encoder.finish();
+	device.queue.submit([commands]);
+
+	await stagingBuffer.mapAsync(GPUMapMode.READ);
+	const data = stagingBuffer.getMappedRange();
+	const view = new DataView(data);
+
+	const u32Array = [];
+	for (let i = 0; i < view.byteLength / 4; i++) {
+		u32Array.push(view.getFloat32(i * 4, true)); // The `true` is for little-endian
 	}
 	return u32Array;
 }

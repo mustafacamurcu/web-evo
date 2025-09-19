@@ -2,6 +2,7 @@
 @group(0) @binding(1) var<storage, read> bot_senses: array<BotSenses>;
 @group(0) @binding(2) var<storage, read_write> vertex_datas: array<BotVertexData>;
 
+// 1 thread per bot
 @compute @workgroup_size(64) fn main(
 	@builtin(global_invocation_id) id: vec3u
 ) {

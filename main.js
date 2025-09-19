@@ -28,6 +28,7 @@ function createStorageBuffer(device, storageDefinitionName, code, objectCount, u
 	const objectSize = getSizeAndAlignmentOfUnsizedArrayElement(storageDefinition).size;
 	const totalSize = objectSize * objectCount;
 	const structuredView = makeStructuredView(storageDefinition, new ArrayBuffer(totalSize));
+	console.log(`Creating buffer ${storageDefinitionName} with size ${totalSize} (${objectCount} objects of size ${objectSize})`);
 	const buffer = device.createBuffer({
 		size: totalSize,
 		usage: GPUBufferUsage.STORAGE | usage,
@@ -42,7 +43,7 @@ function createStorageBuffer(device, storageDefinitionName, code, objectCount, u
 
 // Constants
 const MAX_BOTS = 64 * 64 * 1; // increase by adding a level to prefix sum
-const INITIAL_BOT_COUNT = 50;
+const INITIAL_BOT_COUNT = 700;
 const PASSES = 7; // sense, decide, step, prefix1, prefix2, prefix3, reaper
 const QUERIES_PER_PASS = 2;
 const REPEAT = 20;
@@ -51,7 +52,12 @@ const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * REPEAT + 2 + 2; // +2 for vert
 async function main() {
 	// WebGPU setup
 	const adapter = await navigator.gpu?.requestAdapter();
-	const device = await adapter?.requestDevice({
+	const defaultLimits = adapter.limits;
+	const device = await adapter.requestDevice({
+		requiredLimits: {
+			maxStorageBufferBindingSize: defaultLimits.maxStorageBufferBindingSize,
+			maxStorageBuffersPerShaderStage: defaultLimits.maxStorageBuffersPerShaderStage,
+		},
 		requiredFeatures: ['timestamp-query'],
 	});
 	const canvas = document.querySelector('canvas');
@@ -68,25 +74,29 @@ async function main() {
 	for (let i = 1; i < MAX_BOTS; ++i) {
 		if (i <= INITIAL_BOT_COUNT) {
 			let bot = {
-				color: [Math.random(), Math.random(), Math.random(), 1.0],
+				color: [0.0, 0.0, 0.0, 1.0],
 				position: [2 * (Math.random() - 0.5), 2 * (Math.random() - 0.5)],
 				velocity: [0.00002 * (Math.random() - 0.5), 0.00002 * (Math.random() - 0.5)],
 				die_stay_breed: 1, // alive
-				energy: 0,
+				energy: 10000,
 				id: i,
-				age: 0
+				age: 0,
+				decision: 0,
+				brain_id: i
 			};
 			bot_data.push(bot);
 		}
 		else {
 			let bot = {
-				color: [Math.random(), Math.random(), Math.random(), 0.0],
+				color: [0.0, 0.0, 0.0, 1.0],
 				position: [10, 10], // offscreen
 				velocity: [0, 0],
 				die_stay_breed: 0, // dead
 				energy: 0,
 				id: i,
 				age: 0,
+				decision: 0,
+				brain_id: i
 			}
 			bot_data.push(bot);
 		}
@@ -96,12 +106,18 @@ async function main() {
 	let brain_data = [];
 	for (let i = 0; i < MAX_BOTS; ++i) {
 		let brain = {
-			w1: new Float32Array(16 * 32).map(() => (Math.random() * 2 - 1) * 0.1),
-			b1: new Float32Array(32).map(() => (Math.random() * 2 - 1) * 0.1),
-			w2: new Float32Array(32 * 16).map(() => (Math.random() * 2 - 1) * 0.1),
-			b2: new Float32Array(16).map(() => (Math.random() * 2 - 1) * 0.1),
+			W1: Array.from({ length: 16 * 32 }, () => Math.random() * 2 - 1),
+			B1: Array.from({ length: 32 }, () => Math.random() * 2 - 1),
+			W2: Array.from({ length: 32 * 16 }, () => Math.random() * 2 - 1),
+			B2: Array.from({ length: 16 }, () => Math.random() * 2 - 1)
 		}
 		brain_data.push(brain);
+	}
+
+	// brain free list
+	let brain_free_list_data = [];
+	for (let i = INITIAL_BOT_COUNT + 1; i < MAX_BOTS; ++i) {
+		brain_free_list_data.push(i);
 	}
 
 	// Load shader codes
@@ -130,8 +146,18 @@ async function main() {
 		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
 	const verticesBuffer = createStorageBuffer(device, "vertex_datas", botVerticesShaderCode, MAX_BOTS,
 		GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
+	const brainFreeListBuffer = createStorageBuffer(device, "brain_free_list", reaperShaderCode, MAX_BOTS,
+		GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, brain_free_list_data);
+
+	const brainFreeListCounterBuffer = device.createBuffer({
+		label: "free list counter",
+		size: 4, // 1 u32 value * 4 bytes/u32 = 4 bytes
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+	});
+	device.queue.writeBuffer(brainFreeListCounterBuffer, 0, new Uint32Array([MAX_BOTS - INITIAL_BOT_COUNT]));
 
 	const numBotsBuffer = device.createBuffer({
+		label: "num_bots",
 		size: 3 * 4, // 3 u32 values * 4 bytes/u32 = 12 bytes
 		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
 	});
@@ -146,8 +172,9 @@ async function main() {
 	const botSensesPipeline = createBotSensePipeline(device, botSenseShaderCode, botsBuffer, botSensesBuffer);
 	const botDecidePipeline = createBotDecidePipeline(device, botDecideShaderCode, botsBuffer, botBrainsBuffer, botSensesBuffer);
 	const botStepperPipeline = createBotStepperPipeline(device, botStepShaderCode, botsBuffer, scratchBuffer);
-	const prefixSumPipeline = createPrefixSumPipeline(device, prefixSumShaderCode, L1Buffer, L2Buffer, L3Buffer, scratchBuffer);
-	const reaperPipeline = createReaperPipeline(device, reaperShaderCode, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer, numBotsBuffer);
+	const prefixSumPipeline = createPrefixSumPipeline(device, prefixSumShaderCode, L1Buffer, L2Buffer, L3Buffer, scratchBuffer, numBotsBuffer);
+	const reaperPipeline = createReaperPipeline(device, reaperShaderCode, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer,
+		botBrainsBuffer, brainFreeListBuffer, brainFreeListCounterBuffer);
 	const botVerticesPipeline = createBotVerticesPipeline(device, botVerticesShaderCode, botsBuffer, botSensesBuffer, verticesBuffer);
 	const renderPipeline = createRenderPipeline(device, renderShaderCode, context, verticesBufferStride, depthTexture);
 
@@ -265,7 +292,7 @@ async function main() {
 			const reaperPass = encoder.beginComputePass(tswrites(base + 12, base + 13));
 			reaperPass.setPipeline(reaperPipeline.pipeline);
 			reaperPass.setBindGroup(0, reaperPipeline.bindGroup);
-			reaperPass.dispatchWorkgroups(MAX_BOTS / 64);
+			reaperPass.dispatchWorkgroupsIndirect(numBotsBuffer, 0);
 			reaperPass.end();
 		}
 

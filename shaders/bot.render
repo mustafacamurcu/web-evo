@@ -34,9 +34,11 @@ fn vert_main(
   } else if ((senses & (1u << sense_id)) != 0u) {
     output.color = vec4(1.0, 0.0, 0.0, 1.0); // Active sense - red
     output.position.z = 0.1;
+    output.position = vec4(100.0, 100.0, 0.0, 1.0);
   } else {
     output.color = vec4(0.5, 0.5, 0.5, 1.0); // Inactive sense - gray
     output.position.z = 0.1;
+    output.position = vec4(100.0, 100.0, 0.0, 1.0);
   }
 
   return output;

@@ -1,6 +1,18 @@
 @group(0) @binding(0) var<storage, read> bots: array<Bot>;
 @group(0) @binding(1) var<storage, read_write> scratchBuffer: array<Bot>;
 
+const PI = 3.14159265;
+
+const IDLE_ENERGY_COST = 5;
+const MOVE_ENERGY_COST = 1;
+const TURN_ENERGY_COST = 10;
+
+const WALL_PENALTY = 5; // 5 degrees in radians
+
+const MOVE_SPEED = 0.0001;
+const TURN_SPEED = 5.0 * PI / 180.0; // 5 degrees in radians
+
+
 // 1 thread per bot
 // 1 workgroup per 64 bots
 @compute @workgroup_size(64) fn main(
@@ -9,35 +21,70 @@
 ) {
 	if (bots[id.x].die_stay_breed == 0) {
 		// Dead bot, do nothing
-		scratchBuffer[id.x] = bots[id.x];
+		scratchBuffer[id.x].die_stay_breed = 0;
 		return;
 	}
 
-
 	var bot: Bot = bots[id.x];
+
+	// time passes
 	bot.age = bot.age + 1;
 
-	bot.velocity = normalize(bots[id.x].velocity) * 0.0001;
-	bot.position = bots[id.x].position + bot.velocity;
+	let hit_the_wall = false;
 
+	// handle decision
+	let decision = bots[id.x].decision;
+	if (decision < 4u) {
+		// Do nothing
+		bot.energy -= IDLE_ENERGY_COST;
+	}
+	else if (decision < 8u) {
+		// Move forward
+		let boost = f32(decision - 4u + 1u); // 1.0 to 4.0
+		let speed = MOVE_SPEED * boost; // 1x to 4x speed
+		bot.energy -= MOVE_ENERGY_COST * speed;
+		bot.position = bots[id.x].position + normalize(bots[id.x].velocity) * speed;
+		if (bot.position.x < -.95 || bot.position.x > .95 || bot.position.y < -.95 || bot.position.y > .95) {
+			bot.energy -= WALL_PENALTY; // extra penalty for hitting the wall
+		}
+		bot.position.x = clamp(bot.position.x, -.95, .95);
+		bot.position.y = clamp(bot.position.y, -.95, .95);
+	}
+	else if (decision < 12u) {
+		// Turn left
+		let boost = f32(decision - 8u + 1u); // 1.0 to 4.0
+		let angle = TURN_SPEED * boost;
+		bot.energy -= TURN_ENERGY_COST * abs(angle);
+		let c = cos(angle);
+		let s = sin(angle);
+		let v = bot.velocity;
+		let new_v = vec2f(v.x * c - v.y * s, v.x * s + v.y * c);
+		bot.velocity = new_v;
+	}
+	else if (decision < 16u) {
+		// Turn right
+		let boost = f32(decision - 12u + 1u); // 1.0 xs 4.0
+		let angle = -TURN_SPEED * boost;
+		bot.energy -= TURN_ENERGY_COST * abs(angle);
+		let c = cos(angle);
+		let s = sin(angle);
+		let v = bot.velocity;
+		let new_v = vec2f(v.x * c - v.y * s, v.x * s + v.y * c);
+		bot.velocity = new_v;
+	}
 
-	bot.die_stay_breed = 1;
-
-	// Bounce off walls with epsilon to avoid floating point errors
-	let epsilon = 0.001;
-	if ((bot.position.x < -1.0 + epsilon || bot.position.x > 1.0 - epsilon)
-			&& sign(bot.velocity.x) == sign(bot.position.x)) {
-		bot.velocity.x = -bot.velocity.x;
+	// should die?
+	if (bot.energy <= 0.0) {
+		bot.die_stay_breed = 0;
+	} 
+	// should breed?
+	else if (bot.energy > 20.0 && bot.age > 5000) {
+		bot.die_stay_breed = 2;
+	}
+	// stay alive
+	else {
 		bot.die_stay_breed = 1;
 	}
-	if ((bot.position.y < -1.0 + epsilon || bot.position.y > 1.0 - epsilon)
-		&& sign(bot.velocity.y) == sign(bot.position.y)) {
-		bot.velocity.y = -bot.velocity.y;
-		if (bot.age > 100) {
-			bot.die_stay_breed = 1;
-		}
-	}
-
 
 	scratchBuffer[id.x] = bot;
 }
