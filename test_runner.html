@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>WebGPU Pipeline Test Runner</title>
+	<style>
+		body {
+			background: #181a1b;
+			color: #e0e0e0;
+			font-family: 'Segoe UI', Arial, sans-serif;
+		}
+
+		h1 {
+			color: #ffcc00;
+		}
+
+		pre#output {
+			background: #23272e;
+			color: #e0e0e0;
+			padding: 1em;
+			border-radius: 8px;
+			font-size: 1em;
+			box-shadow: 0 2px 8px #0008;
+		}
+	</style>
+</head>
+
+<body>
+	<h1>WebGPU Pipeline Test Runner</h1>
+	<pre id="output"></pre>
+	<script type="module">
+		// Patch console.log and console.error ONCE before any imports
+		const outputElem = document.getElementById('output');
+		const origLog = console.log.bind(console);
+		const origError = console.error.bind(console);
+		function log(...args) {
+			outputElem.textContent += args.join(' ') + '\n';
+			origLog(...args);
+		}
+		function error(...args) {
+			outputElem.textContent += '[ERROR] ' + args.join(' ') + '\n';
+			origError(...args);
+		}
+		console.log = log;
+		console.error = error;
+		// Import all test files (these will use the patched console)
+		// import('../tests/bot_step.test.js');
+		// import('../tests/bot_senses.test.js');
+		import('../tests/bot_food_contention.test.js');
+		import('../tests/bot_eat_food.test.js');
+	</script>
+</body>
+
+</html>

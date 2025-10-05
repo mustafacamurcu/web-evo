@@ -1,13 +1,17 @@
 // Reaper pass: copies bots from scratchBuffer to botsBuffer using prefix sums
 
+// L1: offset = 0, size = 64*64
+// L2: offset = 64*64, size = 64
+// L3: offset = 64*64 + 64, size = 1
+const L2_OFFSET = 64 * 64;
+const L3_OFFSET = L2_OFFSET + 64;
+
 @group(0) @binding(0) var<storage, read> scratchBuffer: array<Bot>;
 @group(0) @binding(1) var<storage, read_write> botsBuffer: array<Bot>;
-@group(0) @binding(2) var<storage, read> l1Buffer: array<u32>;
-@group(0) @binding(3) var<storage, read> l2Buffer: array<u32>;
-@group(0) @binding(4) var<storage, read> l3Buffer: array<u32>;
-@group(0) @binding(5) var<storage, read_write> bot_brains: array<Brain>;
-@group(0) @binding(6) var<storage, read_write> brain_free_list: array<u32>;
-@group(0) @binding(7) var<storage, read_write> brain_free_list_counter: atomic<u32>;
+@group(0) @binding(2) var<storage, read> prefixBuffer: array<u32>;
+@group(0) @binding(3) var<storage, read_write> bot_brains: array<Brain>;
+@group(0) @binding(4) var<storage, read_write> brain_free_list: array<u32>;
+@group(0) @binding(5) var<storage, read_write> brain_free_list_counter: atomic<u32>;
 
 var<workgroup> parent_brain_id: u32;
 var<workgroup> child_brain_id: u32;
@@ -16,12 +20,18 @@ var<workgroup> out_idx: u32;
 
 // 1 bot per workgroup
 @compute @workgroup_size(64) fn main(
-  @builtin(global_invocation_id) global_id: vec3u,
   @builtin(local_invocation_id) local_id: vec3u,
   @builtin(workgroup_id) workgroup_id: vec3u
 ) {
-  // only first thread in workgroup does the normal work
+
   if (local_id.x == 0) {
+    let newBotCount = prefixBuffer[L3_OFFSET + 0u]; // update with MAX_BOTS
+    // clean up area where there will be no bots
+    if (workgroup_id.x >= newBotCount) {
+      botsBuffer[workgroup_id.x].die_stay_breed = 0;
+    }
+
+    // incoming bot work starts here
     let bot_id = workgroup_id.x;
     var bot = scratchBuffer[bot_id];
     dsb = bot.die_stay_breed;
@@ -34,15 +44,15 @@ var<workgroup> out_idx: u32;
 
     if (dsb > 0) { // Stay alive
       if (bot_id > 0u) {
-        out_idx += l1Buffer[bot_id - 1u];
+        out_idx += prefixBuffer[bot_id - 1u];
       }
 
       if (bot_id > 64u) {
-        out_idx += l2Buffer[(bot_id-1u) / 64u - 1];
+        out_idx += prefixBuffer[(bot_id-1u) / 64u - 1 + L2_OFFSET];
       }
 
       if (bot_id > 64u * 64u) {
-        out_idx += l3Buffer[(bot_id-1u) / (64u * 64u) - 1];
+        out_idx += prefixBuffer[(bot_id-1u) / (64u * 64u) - 1 + L3_OFFSET];
       }
 
       if (out_idx < arrayLength(&botsBuffer)) {
@@ -53,7 +63,6 @@ var<workgroup> out_idx: u32;
     if (dsb == 2 && out_idx+1 < arrayLength(&botsBuffer)) { // Breed
       // reset parent age
       botsBuffer[out_idx].age = 0;
-      botsBuffer[out_idx].energy = bot.energy / 2.0;
       
       // acquire new brain slot
       let brain_index = atomicSub(&brain_free_list_counter, 1u) - 1u;
@@ -65,10 +74,11 @@ var<workgroup> out_idx: u32;
       new_bot.id = bot.id + 1000000u;
       new_bot.die_stay_breed = 1u;
       new_bot.age = 0;
-      // random position
-      new_bot.position = vec2f((f32((bot.id * 37u) % 100u) / 100.0 - 0.5), (f32((bot.id * 57u) % 100u) / 100.0 - 0.5));
+      let position = bot.position + normalize(bot.direction) * .1;
+      new_bot.position = vec2f(clamp(position.x, -.95, .95), clamp(position.y, -.95, .95));
       new_bot.brain_id = child_brain_id;
-      new_bot.energy = bot.energy;
+      new_bot.color = bot.color;
+      new_bot.energy = 100;
       botsBuffer[out_idx + 1] = new_bot;
     }
   }

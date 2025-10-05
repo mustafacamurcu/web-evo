@@ -1,0 +1,70 @@
+@group(0) @binding(0) var<storage, read_write> num_bots: array<u32,8>;
+@group(0) @binding(1) var<storage, read_write> botsBuffer: array<Bot>;
+@group(0) @binding(2) var<storage, read_write> bot_brains: array<Brain>;
+@group(0) @binding(3) var<storage, read_write> brain_free_list: array<u32>;
+@group(0) @binding(4) var<storage, read_write> brain_free_list_counter: atomic<u32>;
+
+var<workgroup> new_brain_id: u32;
+var<workgroup> parent_brain_id: u32;
+
+// 1 workgroup only
+@compute @workgroup_size(64) fn main(
+  @builtin(local_invocation_id) local_id: vec3u,
+  @builtin(workgroup_id) workgroup_id: vec3u,
+	@builtin(num_workgroups) num_workgroups: vec3u
+) {
+	let bot_count = num_bots[0];
+	let t_id = local_id.x;
+	if (bot_count == 0u || bot_count >= arrayLength(&botsBuffer) / 2u) {
+		return; // No bots or already at max population
+	}
+
+	if (t_id == 0u && workgroup_id.x == 0u) {
+		// Update bot count to double it
+		num_bots[0] = bot_count+1u;
+	}
+
+	if (t_id == 0u) {
+		// Get a brain slot for the new bot
+		let index = atomicSub(&brain_free_list_counter, 1u) -1u;
+		new_brain_id = brain_free_list[index];
+		// pick a random parent bot to copy brain from
+		let parent_bot_index = u32(fract(botsBuffer[0].position.x) * f32(bot_count));
+		let bot = botsBuffer[parent_bot_index];
+		parent_brain_id = bot.brain_id;
+		var new_bot: Bot = bot;
+		new_bot.id = bot.id + 1000000u;
+		new_bot.die_stay_breed = 1u;
+		new_bot.age = 0;
+		let position = bot.position + normalize(bot.direction) * .1;
+		new_bot.position =  bot.position + normalize(bot.direction) * .1;
+		new_bot.brain_id = new_brain_id;
+		new_bot.color = bot.color;
+		new_bot.energy = 100;
+		botsBuffer[bot_count] = new_bot;
+	}
+
+	// all threads in workgroup do the brain copy
+	let w1_size = 16u * 32u;
+	let w1_chunk_size = w1_size / 64u;
+	var start = t_id * w1_chunk_size;
+	for (var i = 0u; i < w1_chunk_size; i = i + 1u) {
+			let idx = start + i;
+			bot_brains[new_brain_id].W1[idx] = bot_brains[parent_brain_id].W1[idx];
+	}
+	let b1_size = 32u;
+	if (t_id < 32u) {
+		bot_brains[new_brain_id].B1[t_id] = bot_brains[parent_brain_id].B1[t_id];
+	}
+	let w2_size = 32u * 16u;
+	let w2_chunk_size = w2_size / 64u;
+	start = t_id * w2_chunk_size;
+	for (var i = 0u; i < w2_chunk_size; i = i + 1u) {
+			let idx = start + i;
+			bot_brains[new_brain_id].W2[idx] = bot_brains[parent_brain_id].W2[idx];
+	}
+	let b2_size = 16u;
+	if (t_id < 16u) {
+		bot_brains[new_brain_id].B2[t_id] = bot_brains[parent_brain_id].B2[t_id];
+	}
+}

@@ -1,7 +1,7 @@
 struct Bot {
   color: vec4f,
   position: vec2f,
-  velocity: vec2f,
+  direction: vec2f,
 	die_stay_breed: u32, // 0 = kill, 1 = nothing, 2 = duplicate 
   age: u32,
   energy: f32,
@@ -9,6 +9,15 @@ struct Bot {
   decision: u32, // 0-15
   brain_id: u32,
 }; // 52 bytes size, padded to 64 bytes
+
+struct Food {
+  position: vec2f,
+  energy: f32,
+}
+
+struct FoodSlots {
+  slots: array<u32, 100>,
+}
 
 struct BotVertexData {
   color: vec4f,
@@ -33,6 +42,7 @@ struct Brain {
 }
 
 struct BotSense {
+  object_id: u32,
   type_id: u32,
   distance: f32,
 }

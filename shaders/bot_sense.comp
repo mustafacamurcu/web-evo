@@ -1,5 +1,7 @@
 @group(0) @binding(0) var<storage, read> bots: array<Bot>;
 @group(0) @binding(1) var<storage, read_write> bot_senses: array<BotSenses>;
+@group(0) @binding(2) var<storage, read> foods: array<Food>;
+
 const N_RAYS = 8;
 const FOV = 3.14159265 / 2.0; // 90 degrees
 const RAY_FOV = FOV / f32(N_RAYS);
@@ -21,7 +23,9 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 	@builtin(num_workgroups) num_workgroups: vec3u
 ) {
 	let bot_id = workgroup_id.x;
+	let pos = bots[bot_id].position;
 	let num_bots = num_workgroups.x;
+	bot_senses[bot_id].senses[0] = BotSense(1u,1u,1.0);
 
 	// Each threads owns 1/64 of the bots
 	// Finds the closest bot for each ray
@@ -32,11 +36,11 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 	let bots_begin = local_id.x * bots_per_thread;
 	let bots_end = min(bots_begin + bots_per_thread, num_bots);
 	let t_id = local_id.x;
-	let bot_dir = normalize(bots[bot_id].velocity);
+	let bot_dir = normalize(bots[bot_id].direction);
 
 	// Initialize thread senses
 	for (var i = 0u; i < N_RAYS; i = i + 1u) {
-		thread_senses[t_id].senses[i] = BotSense(0u, VISION_DISTANCE); // No bot, max distance
+		thread_senses[t_id].senses[i] = BotSense(0u, 0u, VISION_DISTANCE); // No bot, max distance
 	}
 
 	// Each threads looks through their subset of bots
@@ -44,7 +48,7 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 		if (i == bot_id) {
 			continue;
 		}
-		let to_other = bots[i].position - bots[bot_id].position;
+		let to_other = bots[i].position - pos;
 		let dist = length(to_other);
 		if (dist > VISION_DISTANCE) {
 			continue; // Too far
@@ -57,7 +61,29 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 		// Within fov and distance
 		var ray_id = u32((angle + FOV/2.0) / RAY_FOV);
 		if (dist < thread_senses[t_id].senses[ray_id].distance) {
-			thread_senses[t_id].senses[ray_id] = BotSense(1u, dist); // Found closer bot
+			thread_senses[t_id].senses[ray_id] = BotSense(i, 1u, dist); // Found closer bot
+		}
+	}
+
+	// Each thread looks through their subset of food
+	let food_per_thread = 1000u/ 64u + 1u;
+	let food_begin = t_id * food_per_thread;
+	let food_end = min(food_begin + food_per_thread, 1000u);
+	for (var i = food_begin; i < food_end; i = i + 1u) {
+		let to_food = foods[i].position - pos;
+		let dist = length(to_food);
+		if (dist > VISION_DISTANCE) {
+			continue; // Too far
+		}
+		let to_food_dir = normalize(to_food);
+		let angle = get_signed_angle(bot_dir, to_food_dir);
+		if (angle < -FOV/2.0 || angle > FOV/2.0) {
+			continue; // Out of this fov
+		}
+		// Within fov and distance
+		var ray_id = u32((angle + FOV/2.0) / RAY_FOV);
+		if (dist < thread_senses[t_id].senses[ray_id].distance) {
+			thread_senses[t_id].senses[ray_id] = BotSense(i, 2u, dist); // Found closer food
 		}
 	}
 
@@ -67,8 +93,24 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 	// 8 threads find the best candidate for their ray
 	if (t_id < N_RAYS) {
 		let ray_id = t_id;
-		var min_ray: BotSense = thread_senses[0u].senses[ray_id];
-		for(var i = 1u; i < 64u; i = i + 1u) {
+		
+		
+		// find distance to wall in this ray's direction
+		let ray_angle = -FOV/2.0 + RAY_FOV * f32(ray_id) - RAY_FOV/2.0;
+		let ray_dir = normalize(vec2f(
+				cos(ray_angle) * bot_dir.x - sin(ray_angle) * bot_dir.y,
+				sin(ray_angle) * bot_dir.x + cos(ray_angle) * bot_dir.y
+		));
+		
+		let dist_to_left_wall = abs(pos.x - (-0.95))/abs(ray_dir.x);
+		let dist_to_right_wall = abs(pos.x - (0.95))/abs(ray_dir.x);
+		let dist_to_bottom_wall = abs(pos.y - (-0.95))/abs(ray_dir.y);
+		let dist_to_top_wall = abs(pos.y - (0.95))/abs(ray_dir.y);
+
+		var dist_to_wall = min(min(dist_to_left_wall, dist_to_right_wall), min(dist_to_bottom_wall, dist_to_top_wall));
+
+		var min_ray: BotSense = BotSense(0u, 0u, dist_to_wall);
+		for(var i = 0u; i < 64u; i = i + 1u) {
 			if (thread_senses[i].senses[ray_id].distance < min_ray.distance) {
 				min_ray = thread_senses[i].senses[ray_id];
 			}

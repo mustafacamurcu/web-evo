@@ -1,4 +1,4 @@
-export function createPrefixSumPipeline(device, code, L1Buffer, L2Buffer, L3Buffer, scratchBuffer, numBotsBuffer) {
+export function createPrefixSumPipeline(device, code, prefixBuffer, scratchBuffer) {
 	const module = device.createShaderModule({ code, });
 	const pipeline1 = device.createComputePipeline({
 		layout: 'auto',
@@ -24,7 +24,7 @@ export function createPrefixSumPipeline(device, code, L1Buffer, L2Buffer, L3Buff
 	});
 
 	// Bind Groups
-	const L1BindGroup = device.createBindGroup({
+	const bindGroup1 = device.createBindGroup({
 		layout: pipeline1.getBindGroupLayout(0),
 		entries: [
 			{
@@ -36,53 +36,35 @@ export function createPrefixSumPipeline(device, code, L1Buffer, L2Buffer, L3Buff
 			{
 				binding: 1,
 				resource: {
-					buffer: L1Buffer,
+					buffer: prefixBuffer,
 				},
 			},
 		],
 	});
 
-	const L2BindGroup = device.createBindGroup({
+	const bindGroup2 = device.createBindGroup({
 		layout: pipeline2.getBindGroupLayout(0),
 		entries: [
 			{
 				binding: 1,
 				resource: {
-					buffer: L1Buffer,
-				},
-			},
-			{
-				binding: 2,
-				resource: {
-					buffer: L2Buffer,
+					buffer: prefixBuffer,
 				},
 			},
 		],
 	});
 
-	const L3BindGroup = device.createBindGroup({
+	const bindGroup3 = device.createBindGroup({
 		layout: pipeline3.getBindGroupLayout(0),
 		entries: [
 			{
-				binding: 2,
+				binding: 1,
 				resource: {
-					buffer: L2Buffer,
-				},
-			},
-			{
-				binding: 3,
-				resource: {
-					buffer: L3Buffer,
-				},
-			},
-			{
-				binding: 4,
-				resource: {
-					buffer: numBotsBuffer,
+					buffer: prefixBuffer,
 				},
 			},
 		],
 	});
 
-	return { pipeline1, pipeline2, pipeline3, L1BindGroup, L2BindGroup, L3BindGroup };
+	return { pipeline1, pipeline2, pipeline3, bindGroup1, bindGroup2, bindGroup3 };
 }

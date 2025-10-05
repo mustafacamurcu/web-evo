@@ -1,0 +1,25 @@
+struct VertexOutput {
+  @builtin(position) position : vec4f,
+  @location(6) color : vec4f,
+}
+
+@vertex
+fn vert_main(
+  @location(0) position : vec2f,
+  @location(1) vertex_pos : vec2f,
+  @location(2) energy : f32,
+) -> VertexOutput {
+  var output : VertexOutput;
+  output.position = vec4(vertex_pos + position, 0.0, 1.0);
+
+  // Map energy to color (green to red)
+  let energy_clamped = clamp(energy / 100.0, 0.0, 1.0);
+  output.color = vec4(1.0 - energy_clamped, energy_clamped, 0.0, 1.0);
+
+  return output;
+}
+
+@fragment
+fn frag_main(@location(6) color : vec4f) -> @location(0) vec4f {
+  return color;
+}

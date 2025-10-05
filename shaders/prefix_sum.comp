@@ -1,10 +1,13 @@
 const N_THREADS = 64;
 
+// L1: offset = 0, size = 64*64
+// L2: offset = 64*64, size = 64
+// L3: offset = 64*64 + 64, size = 1
+const L2_OFFSET = N_THREADS * N_THREADS;
+const L3_OFFSET = L2_OFFSET + N_THREADS;
+
 @group(0) @binding(0) var<storage, read> scratchBuffer: array<Bot>;
-@group(0) @binding(1) var<storage, read_write> l1Buffer: array<u32>;
-@group(0) @binding(2) var<storage, read_write> l2Buffer: array<u32>;
-@group(0) @binding(3) var<storage, read_write> l3Buffer: array<u32>;
-@group(0) @binding(4) var<storage, read_write> num_bots: array<u32,3>;
+@group(0) @binding(1) var<storage, read_write> prefixBuffer: array<u32>;
 
 var<workgroup> prefix_sum_tree: array<u32, N_THREADS>;
 
@@ -51,7 +54,7 @@ fn prefix_sum(t_id: u32) {
 	prefix_sum_tree[t_id] = scratchBuffer[global_id.x].die_stay_breed;
 	prefix_sum(t_id);
 
-	l1Buffer[global_id.x] = prefix_sum_tree[t_id] + scratchBuffer[global_id.x].die_stay_breed;
+	prefixBuffer[global_id.x] = prefix_sum_tree[t_id] + scratchBuffer[global_id.x].die_stay_breed;
 }
 
 @compute @workgroup_size(N_THREADS) fn l2(
@@ -60,10 +63,10 @@ fn prefix_sum(t_id: u32) {
 ) {
 	let t_id = local_id.x;
 
-	prefix_sum_tree[t_id] = l1Buffer[global_id.x*N_THREADS + N_THREADS - 1];
+	prefix_sum_tree[t_id] = prefixBuffer[global_id.x*N_THREADS + N_THREADS - 1];
 	prefix_sum(t_id);
 
-	l2Buffer[global_id.x] = prefix_sum_tree[t_id] + l1Buffer[global_id.x*N_THREADS + N_THREADS - 1];
+	prefixBuffer[global_id.x + L2_OFFSET] = prefix_sum_tree[t_id] + prefixBuffer[global_id.x*N_THREADS + N_THREADS - 1];
 }
 
 @compute @workgroup_size(N_THREADS) fn l3(
@@ -71,17 +74,10 @@ fn prefix_sum(t_id: u32) {
 	@builtin(local_invocation_id) local_id: vec3u
 ) {
 	let t_id: u32 = local_id.x;
-	let len = arrayLength(&l3Buffer);
-	
-	prefix_sum_tree[t_id] = l2Buffer[t_id*N_THREADS + N_THREADS - 1];
+
+	prefix_sum_tree[t_id] = prefixBuffer[t_id*N_THREADS + N_THREADS - 1 + L2_OFFSET];
 	prefix_sum(t_id);
 
-	l3Buffer[t_id] = prefix_sum_tree[t_id] + l2Buffer[t_id*N_THREADS + N_THREADS - 1];
-
-	if (t_id == len - 1u) {
-		num_bots[0] = l3Buffer[t_id];
-		num_bots[1] = 1u;
-		num_bots[2] = 1u;
-	}
+	prefixBuffer[t_id + L3_OFFSET] = prefix_sum_tree[t_id] + prefixBuffer[t_id*N_THREADS + N_THREADS - 1 + L2_OFFSET];
 }
 

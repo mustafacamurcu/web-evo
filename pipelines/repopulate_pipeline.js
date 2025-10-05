@@ -1,4 +1,4 @@
-export function createReaperPipeline(device, code, scratchBuffer, botsBuffer, prefixBuffer,
+export function creatRepopulatePipeline(device, code, botsBuffer, numBotsBuffer,
 	botBrainsBuffer, brainFreeListBuffer, brainFreeListCounterBuffer) {
 	const module = device.createShaderModule({ code, });
 	const pipeline = device.createComputePipeline({
@@ -14,7 +14,7 @@ export function createReaperPipeline(device, code, scratchBuffer, botsBuffer, pr
 			{
 				binding: 0,
 				resource: {
-					buffer: scratchBuffer,
+					buffer: numBotsBuffer,
 				},
 			},
 			{
@@ -26,23 +26,17 @@ export function createReaperPipeline(device, code, scratchBuffer, botsBuffer, pr
 			{
 				binding: 2,
 				resource: {
-					buffer: prefixBuffer,
+					buffer: botBrainsBuffer,
 				},
 			},
 			{
 				binding: 3,
 				resource: {
-					buffer: botBrainsBuffer,
-				},
-			},
-			{
-				binding: 4,
-				resource: {
 					buffer: brainFreeListBuffer,
 				}
 			},
 			{
-				binding: 5,
+				binding: 4,
 				resource: {
 					buffer: brainFreeListCounterBuffer,
 				}

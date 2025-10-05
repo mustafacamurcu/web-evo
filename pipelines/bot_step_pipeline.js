@@ -1,4 +1,4 @@
-export function createBotStepperPipeline(device, code, botsBuffer, scratchBuffer) {
+export function createBotStepperPipeline(device, code, botsBuffer, scratchBuffer, foodSlotsBuffer, foodNextSlotBuffer, botSensesBuffer) {
 	const module = device.createShaderModule({
 		label: 'bot stepper compute module',
 		code,
@@ -27,7 +27,25 @@ export function createBotStepperPipeline(device, code, botsBuffer, scratchBuffer
 				resource: {
 					buffer: scratchBuffer,
 				},
-			}
+			},
+			{
+				binding: 2,
+				resource: {
+					buffer: foodSlotsBuffer,
+				},
+			},
+			{
+				binding: 3,
+				resource: {
+					buffer: foodNextSlotBuffer,
+				},
+			},
+			{
+				binding: 4,
+				resource: {
+					buffer: botSensesBuffer,
+				},
+			},
 		],
 	});
 

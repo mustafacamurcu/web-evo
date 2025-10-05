@@ -4,13 +4,9 @@ import {
 	getSizeAndAlignmentOfUnsizedArrayElement
 } from 'https://greggman.github.io/webgpu-utils/dist/2.x/webgpu-utils.module.js';
 import { createRenderPipeline } from './pipelines/render_pipeline.js';
-import { createBotStepperPipeline } from './pipelines/bot_step_pipeline.js';
-import { createBotDecidePipeline } from './pipelines/bot_decide_pipeline.js';
-import { createPrefixSumPipeline } from './pipelines/prefix_sum_pipeline.js';
-import { createReaperPipeline } from './pipelines/reaper_pipeline.js';
-import { createBotSensePipeline } from './pipelines/bot_sense_pipeline.js';
-import { createBotVerticesPipeline } from './pipelines/bot_vertices_pipeline.js';
-import { dumpBuffer, dumpBufferInt, dumpBufferSense } from './utils.js';
+import { createFoodRenderPipeline } from './pipelines/food_render_pipeline.js';
+import { dumpBotsBuffer, dumpBufferFloat, dumpBufferInt, dumpBufferSense } from './utils.js';
+import { setupSimulation } from './simulation_setup.js';
 
 // also imports structs.wgsl by default
 async function fetchShaderCode(url) {
@@ -21,33 +17,6 @@ async function fetchShaderCode(url) {
 	const structsCode = await structs.text();
 	return structsCode + '\n' + code;
 }
-
-function createStorageBuffer(device, storageDefinitionName, code, objectCount, usage, data = null) {
-	const defs = makeShaderDataDefinitions(code);
-	const storageDefinition = defs.storages[storageDefinitionName];
-	const objectSize = getSizeAndAlignmentOfUnsizedArrayElement(storageDefinition).size;
-	const totalSize = objectSize * objectCount;
-	const structuredView = makeStructuredView(storageDefinition, new ArrayBuffer(totalSize));
-	console.log(`Creating buffer ${storageDefinitionName} with size ${totalSize} (${objectCount} objects of size ${objectSize})`);
-	const buffer = device.createBuffer({
-		size: totalSize,
-		usage: GPUBufferUsage.STORAGE | usage,
-	});
-
-	if (data) {
-		structuredView.set(data);
-		device.queue.writeBuffer(buffer, 0, structuredView.arrayBuffer);
-	}
-	return buffer;
-}
-
-// Constants
-const MAX_BOTS = 64 * 64 * 1; // increase by adding a level to prefix sum
-const INITIAL_BOT_COUNT = 700;
-const PASSES = 7; // sense, decide, step, prefix1, prefix2, prefix3, reaper
-const QUERIES_PER_PASS = 2;
-const REPEAT = 20;
-const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * REPEAT + 2 + 2; // +2 for vertices, +2 for render
 
 async function main() {
 	// WebGPU setup
@@ -60,124 +29,57 @@ async function main() {
 		},
 		requiredFeatures: ['timestamp-query'],
 	});
+
 	const canvas = document.querySelector('canvas');
 	const context = canvas.getContext('webgpu');
 
+	// Compute Pipelines and Buffers setup
+	const { buffers, pipelines, constants } = await setupSimulation(device);
+	const { verticesBuffer, foodsBuffer, numBotsBuffer } = buffers;
+	const { botStepperPipeline,
+		foodStepperPipeline,
+		botDecidePipeline,
+		prefixSumPipeline,
+		reaperPipeline,
+		botSensesPipeline,
+		botVerticesPipeline,
+		numBotsPipeline,
+		repopulatePipeline
+	} = pipelines;
+
+
+	const botStepShaderCode = await fetchShaderCode('bot_step.comp');
+	const defs = makeShaderDataDefinitions(botStepShaderCode);
+	const botsStructStorageDef = defs.storages['bots'];
+
+
+	// Render Pipelines setup
 	const depthTexture = device.createTexture({
 		size: [canvas.width, canvas.height, 1], // Or presentationSize for the swap chain
 		format: "depth24plus", // Or other suitable depth format
-		usage: GPUTextureUsage.RENDER_ATTACHMENT
+		usage: GPUTextureUsage.RENDER_ATTACHMENT,
+		sampleCount: 4, // Match the sample count of the MSAA texture
 	});
 
-	// Initial data setup
-	let bot_data = [];
-	for (let i = 1; i < MAX_BOTS; ++i) {
-		if (i <= INITIAL_BOT_COUNT) {
-			let bot = {
-				color: [0.0, 0.0, 0.0, 1.0],
-				position: [2 * (Math.random() - 0.5), 2 * (Math.random() - 0.5)],
-				velocity: [0.00002 * (Math.random() - 0.5), 0.00002 * (Math.random() - 0.5)],
-				die_stay_breed: 1, // alive
-				energy: 10000,
-				id: i,
-				age: 0,
-				decision: 0,
-				brain_id: i
-			};
-			bot_data.push(bot);
-		}
-		else {
-			let bot = {
-				color: [0.0, 0.0, 0.0, 1.0],
-				position: [10, 10], // offscreen
-				velocity: [0, 0],
-				die_stay_breed: 0, // dead
-				energy: 0,
-				id: i,
-				age: 0,
-				decision: 0,
-				brain_id: i
-			}
-			bot_data.push(bot);
-		}
-	}
+	const msaaTexture = device.createTexture({
+		size: [canvas.width, canvas.height],
+		sampleCount: 4, // Enable multisampling with 4 samples
+		format: navigator.gpu.getPreferredCanvasFormat(),
+		usage: GPUTextureUsage.RENDER_ATTACHMENT,
+	});
 
-	// brain data
-	let brain_data = [];
-	for (let i = 0; i < MAX_BOTS; ++i) {
-		let brain = {
-			W1: Array.from({ length: 16 * 32 }, () => Math.random() * 2 - 1),
-			B1: Array.from({ length: 32 }, () => Math.random() * 2 - 1),
-			W2: Array.from({ length: 32 * 16 }, () => Math.random() * 2 - 1),
-			B2: Array.from({ length: 16 }, () => Math.random() * 2 - 1)
-		}
-		brain_data.push(brain);
-	}
-
-	// brain free list
-	let brain_free_list_data = [];
-	for (let i = INITIAL_BOT_COUNT + 1; i < MAX_BOTS; ++i) {
-		brain_free_list_data.push(i);
-	}
-
-	// Load shader codes
-	const botSenseShaderCode = await fetchShaderCode('bot_sense.comp');
-	const botDecideShaderCode = await fetchShaderCode('bot_decide.comp');
-	const botStepShaderCode = await fetchShaderCode('bot_step.comp');
-	const prefixSumShaderCode = await fetchShaderCode('prefix_sum.comp');
-	const reaperShaderCode = await fetchShaderCode('reaper.comp');
-	const botVerticesShaderCode = await fetchShaderCode('bot_vertices.comp');
 	const renderShaderCode = await fetchShaderCode('bot.render');
+	const foodRenderShaderCode = await fetchShaderCode('food.render');
+	const renderPipeline = createRenderPipeline(device, renderShaderCode, context, msaaTexture, 48, depthTexture);
+	const foodRenderPipeline = createFoodRenderPipeline(device, foodRenderShaderCode, context, msaaTexture, depthTexture);
 
-	// Create buffers
-	const botSensesBuffer = createStorageBuffer(device, 'bot_senses', botSenseShaderCode, MAX_BOTS,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-	const botBrainsBuffer = createStorageBuffer(device, 'bot_brains', botDecideShaderCode, MAX_BOTS,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST, brain_data);
-	const botsBuffer = createStorageBuffer(device, 'bots', botStepShaderCode, MAX_BOTS,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST, bot_data);
-	const scratchBuffer = createStorageBuffer(device, 'scratchBuffer', botStepShaderCode, MAX_BOTS,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-	const L1Buffer = createStorageBuffer(device, 'l1Buffer', prefixSumShaderCode, MAX_BOTS,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-	const L2Buffer = createStorageBuffer(device, 'l2Buffer', prefixSumShaderCode, MAX_BOTS / 64 + 1,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-	const L3Buffer = createStorageBuffer(device, 'l3Buffer', prefixSumShaderCode, MAX_BOTS / 64 / 64 + 1,
-		GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-	const verticesBuffer = createStorageBuffer(device, "vertex_datas", botVerticesShaderCode, MAX_BOTS,
-		GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
-	const brainFreeListBuffer = createStorageBuffer(device, "brain_free_list", reaperShaderCode, MAX_BOTS,
-		GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, brain_free_list_data);
-
-	const brainFreeListCounterBuffer = device.createBuffer({
-		label: "free list counter",
-		size: 4, // 1 u32 value * 4 bytes/u32 = 4 bytes
-		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-	});
-	device.queue.writeBuffer(brainFreeListCounterBuffer, 0, new Uint32Array([MAX_BOTS - INITIAL_BOT_COUNT]));
-
-	const numBotsBuffer = device.createBuffer({
-		label: "num_bots",
-		size: 3 * 4, // 3 u32 values * 4 bytes/u32 = 12 bytes
-		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-	});
-	device.queue.writeBuffer(numBotsBuffer, 0, new Uint32Array([INITIAL_BOT_COUNT, 1, 1]));
-
-	const verticesBufferStride = getSizeAndAlignmentOfUnsizedArrayElement(
-		makeShaderDataDefinitions(botVerticesShaderCode).storages["vertex_datas"]
-	).size;
-
-
-	// Create pipelines
-	const botSensesPipeline = createBotSensePipeline(device, botSenseShaderCode, botsBuffer, botSensesBuffer);
-	const botDecidePipeline = createBotDecidePipeline(device, botDecideShaderCode, botsBuffer, botBrainsBuffer, botSensesBuffer);
-	const botStepperPipeline = createBotStepperPipeline(device, botStepShaderCode, botsBuffer, scratchBuffer);
-	const prefixSumPipeline = createPrefixSumPipeline(device, prefixSumShaderCode, L1Buffer, L2Buffer, L3Buffer, scratchBuffer, numBotsBuffer);
-	const reaperPipeline = createReaperPipeline(device, reaperShaderCode, scratchBuffer, botsBuffer, L1Buffer, L2Buffer, L3Buffer,
-		botBrainsBuffer, brainFreeListBuffer, brainFreeListCounterBuffer);
-	const botVerticesPipeline = createBotVerticesPipeline(device, botVerticesShaderCode, botsBuffer, botSensesBuffer, verticesBuffer);
-	const renderPipeline = createRenderPipeline(device, renderShaderCode, context, verticesBufferStride, depthTexture);
-
+	// Constants
+	const { MAX_BOTS, MAX_FOOD } = constants;
+	const PASSES = 7; // sense, decide, step, prefix1, prefix2, prefix3, reaper
+	const QUERIES_PER_PASS = 2;
+	const REPEAT = 200;
+	const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * REPEAT + 2 + 2; // +2 for vertices, +2 for render
+	const BOT_REFRESH_COUNT = 100; // how many bots to print out
 
 	// --- FPS & IPS display logic ---
 	let paused = false;
@@ -244,6 +146,8 @@ async function main() {
 
 		// Step the computation many times
 		const encoder = device.createCommandEncoder({});
+
+		// COMPUTE PIPELINE
 		for (let i = 0; i < REPEAT; ++i) {
 			let base = i * PASSES * 2;
 			// Calculate bot senses
@@ -267,24 +171,31 @@ async function main() {
 			stepPass.dispatchWorkgroups(MAX_BOTS / 64);
 			stepPass.end();
 
+			// Step food in foodsBuffer (with timestamp)
+			const foodStepPass = encoder.beginComputePass();
+			foodStepPass.setPipeline(foodStepperPipeline.pipeline);
+			foodStepPass.setBindGroup(0, foodStepperPipeline.bindGroup);
+			foodStepPass.dispatchWorkgroups(MAX_FOOD / 64 + 1);
+			foodStepPass.end();
+
 			// Prefix1
 			const prefixSumPass1 = encoder.beginComputePass(tswrites(base + 6, base + 7));
 			prefixSumPass1.setPipeline(prefixSumPipeline.pipeline1);
-			prefixSumPass1.setBindGroup(0, prefixSumPipeline.L1BindGroup);
+			prefixSumPass1.setBindGroup(0, prefixSumPipeline.bindGroup1);
 			prefixSumPass1.dispatchWorkgroups(MAX_BOTS / 64);
 			prefixSumPass1.end();
 
 			// Prefix2
 			const prefixSumPass2 = encoder.beginComputePass(tswrites(base + 8, base + 9));
 			prefixSumPass2.setPipeline(prefixSumPipeline.pipeline2);
-			prefixSumPass2.setBindGroup(0, prefixSumPipeline.L2BindGroup);
+			prefixSumPass2.setBindGroup(0, prefixSumPipeline.bindGroup2);
 			prefixSumPass2.dispatchWorkgroups(MAX_BOTS / 64 / 64);
 			prefixSumPass2.end();
 
 			// Prefix3
 			const prefixSumPass3 = encoder.beginComputePass(tswrites(base + 10, base + 11));
 			prefixSumPass3.setPipeline(prefixSumPipeline.pipeline3);
-			prefixSumPass3.setBindGroup(0, prefixSumPipeline.L3BindGroup);
+			prefixSumPass3.setBindGroup(0, prefixSumPipeline.bindGroup3);
 			prefixSumPass3.dispatchWorkgroups(1);
 			prefixSumPass3.end();
 
@@ -294,6 +205,20 @@ async function main() {
 			reaperPass.setBindGroup(0, reaperPipeline.bindGroup);
 			reaperPass.dispatchWorkgroupsIndirect(numBotsBuffer, 0);
 			reaperPass.end();
+
+			// Update num bots
+			const numBotsPass = encoder.beginComputePass();
+			numBotsPass.setPipeline(numBotsPipeline.pipeline);
+			numBotsPass.setBindGroup(0, numBotsPipeline.bindGroup);
+			numBotsPass.dispatchWorkgroups(1);
+			numBotsPass.end();
+
+			// Repopulate bots if needed
+			const repopulatePass = encoder.beginComputePass();
+			repopulatePass.setPipeline(repopulatePipeline.pipeline);
+			repopulatePass.setBindGroup(0, repopulatePipeline.bindGroup);
+			repopulatePass.dispatchWorkgroups(1);
+			repopulatePass.end();
 		}
 
 		// Update bot vertices for rendering
@@ -304,7 +229,7 @@ async function main() {
 		botVerticesPass.end();
 
 		// render
-		renderPipeline.renderPassDescriptor.colorAttachments[0].view = context
+		renderPipeline.renderPassDescriptor.colorAttachments[0].resolveTarget = context
 			.getCurrentTexture()
 			.createView();
 		renderPipeline.renderPassDescriptor.timestampWrites = tswrites(REPEAT * PASSES * 2 + 2, REPEAT * PASSES * 2 + 3).timestampWrites;
@@ -313,8 +238,21 @@ async function main() {
 		renderPass.setPipeline(renderPipeline.pipeline);
 		renderPass.setVertexBuffer(0, verticesBuffer);
 		renderPass.setVertexBuffer(1, renderPipeline.botModelBuffer);
-		renderPass.draw(3 * 9, MAX_BOTS);
+		renderPass.drawIndirect(numBotsBuffer, 4 * 4);
 		renderPass.end();
+
+		// render food
+		const foodRenderPassDescriptor = foodRenderPipeline.renderPassDescriptor;
+		foodRenderPassDescriptor.colorAttachments[0].resolveTarget = context
+			.getCurrentTexture()
+			.createView();
+
+		const foodRenderPass = encoder.beginRenderPass(foodRenderPassDescriptor);
+		foodRenderPass.setPipeline(foodRenderPipeline.pipeline);
+		foodRenderPass.setVertexBuffer(0, foodsBuffer);
+		foodRenderPass.setVertexBuffer(1, foodRenderPipeline.foodModelBuffer);
+		foodRenderPass.draw(3 * 2, MAX_FOOD);
+		foodRenderPass.end();
 
 		// Resolve timestamp queries if available
 		if (timestamp_enabled) {
@@ -324,6 +262,8 @@ async function main() {
 
 		const commandBuffer = encoder.finish();
 		device.queue.submit([commandBuffer]);
+
+		await device.queue.onSubmittedWorkDone();
 
 		if (timestamp_enabled) {
 			// Read and display average pass times if available
@@ -380,6 +320,7 @@ async function main() {
 			timestampStagingBuffer.unmap();
 		}
 		// --- FPS & IPS update ---
+		var numBots = await dumpBufferInt(device, numBotsBuffer);
 		iterationCount += REPEAT;
 		frameCount++;
 		const now = performance.now();
@@ -389,7 +330,7 @@ async function main() {
 			if (fpsElem) fpsElem.textContent = `FPS: ${fps}`;
 			if (ipsElem) ipsElem.textContent = `IPS: ${ips}`;
 			if (repeatCountElem) repeatCountElem.textContent = `Repeat: ${REPEAT}`;
-			if (repeatCountElem) botCountElem.textContent = `Bot Count: ${INITIAL_BOT_COUNT}`;
+			if (repeatCountElem) botCountElem.textContent = `Bot Count: ${numBots[0]}`;
 			lastIPSUpdate = now;
 			iterationCount = 0;
 			frameCount = 0;
@@ -402,36 +343,16 @@ async function main() {
 		if (e.code === 'Space') {
 			paused = !paused;
 			if (!paused) requestAnimationFrame(frame);
-			else {
-				var bots = await dumpBuffer(device, botsBuffer);
-				var senses = await dumpBufferSense(device, botSensesBuffer);
-				var numBots = await dumpBufferInt(device, numBotsBuffer);
-				console.log('Num bots: ' + numBots[0]);
-				var l3 = await dumpBufferInt(device, L3Buffer);
-				console.log('L3: ' + l3);
-				console.log(bots.slice(0, Math.min(20, INITIAL_BOT_COUNT)));
-				console.log(senses.slice(0, Math.min(20, INITIAL_BOT_COUNT)));
-				for (var j = 0; j < Math.min(20, INITIAL_BOT_COUNT); j++) {
-					var bot = senses[j];
-					for (let i = 0; i < 8; i++) {
-						if (bot[i * 2] != 0) {
-							console.log(`me: ${j + 1}, sense[${i}]: dist=${bot[i * 2 + 1]}, target=${bot[i * 2]}`);
-						}
-					}
-				}
-			}
 		}
 		if (e.code === 'KeyT') {
 			timestamp_enabled = !timestamp_enabled;
 		}
 		const statsElem = document.getElementById('stats');
-		window.addEventListener('keydown', (e) => {
-			if (e.code === 'KeyH') {
-				if (statsElem) {
-					statsElem.style.display = (statsElem.style.display === 'none') ? '' : 'none';
-				}
+		if (e.code === 'KeyH') {
+			if (statsElem) {
+				statsElem.style.display = (statsElem.style.display === 'none') ? '' : 'none';
 			}
-		});
+		}
 	});
 
 	requestAnimationFrame(frame);

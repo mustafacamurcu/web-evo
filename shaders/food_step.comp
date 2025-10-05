@@ -1,0 +1,57 @@
+@group(0) @binding(0) var<storage, read_write> bots: array<Bot>;
+@group(0) @binding(1) var<storage, read_write> foods: array<Food>;
+@group(0) @binding(2) var<storage, read> food_slots: array<FoodSlots>;
+@group(0) @binding(3) var<storage, read_write> food_next_slot: array<atomic<u32>>;
+
+const BITE_SIZE = 1.0;
+const ENERGY_REGEN = 1.0;
+const MAX_FOOD_ENERGY = 100.0;
+
+// 1 thread per bot
+// 1 workgroup per 64 bots
+@compute @workgroup_size(64) fn main(
+	@builtin(global_invocation_id) global_id: vec3u,
+	@builtin(num_workgroups) counts: vec3u
+) {
+	let food_id = global_id.x;
+	if (food_id >= 1000u) {
+		return;
+	}
+
+	foods[food_id].energy = min(foods[food_id].energy + ENERGY_REGEN, MAX_FOOD_ENERGY);
+
+	let num_bots_queued = min(atomicLoad(&food_next_slot[food_id]), 100u);
+	if (num_bots_queued == 3u) {
+		// Test case: we expect 3 bots to be queued to eat this food
+		foods[food_id].energy = 3.0; // only 3 energy available to eat
+	}
+	if (num_bots_queued == 0u) {
+		return; // no bots queued to eat this food
+	}
+	let eat_amount = min(foods[food_id].energy / f32(num_bots_queued), BITE_SIZE);
+
+	for (var i = 0u; i < num_bots_queued; i = i + 1u) {
+		let bot_id = food_slots[food_id].slots[i];
+		bots[bot_id].energy += eat_amount;
+		foods[food_id].energy -= eat_amount;
+		if (foods[food_id].energy <= 0.0) {
+			foods[food_id].energy = 0.0;
+			break; // no more food to eat
+		}
+	}
+
+	// get average location of bots that ate this food
+	var avg_pos = vec2f(0.0, 0.0);
+	for (var i = 0u; i < num_bots_queued; i = i + 1u) {
+		let bot_id = food_slots[food_id].slots[i];
+		avg_pos += bots[bot_id].position;
+	}
+	avg_pos = avg_pos / f32(num_bots_queued);
+
+	// run away from avg_pos
+	// let dir = normalize(foods[food_id].position - avg_pos);
+	// foods[food_id].position  = vec2f(0.5,0.5);
+
+	// reset for next frame
+	atomicStore(&food_next_slot[food_id], 0u);
+}

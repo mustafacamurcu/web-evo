@@ -1,0 +1,29 @@
+// Reaper pass: copies bots from scratchBuffer to botsBuffer using prefix sums
+
+// L1: offset = 0, size = 64*64
+// L2: offset = 64*64, size = 64
+// L3: offset = 64*64 + 64, size = 1
+const L2_OFFSET = 64 * 64;
+const L3_OFFSET = L2_OFFSET + 64;
+
+@group(0) @binding(0) var<storage, read> prefixBuffer: array<u32>;
+@group(0) @binding(1) var<storage, read_write> num_bots: array<u32,8>;
+
+// 1 bot per workgroup
+@compute @workgroup_size(1) fn main(
+  @builtin(global_invocation_id) global_id: vec3u,
+  @builtin(local_invocation_id) local_id: vec3u,
+  @builtin(workgroup_id) workgroup_id: vec3u
+) {
+  // Bot Count
+  num_bots[0] = prefixBuffer[L3_OFFSET + 0u]; // update with MAX_BOTS
+  num_bots[1] = 1u;
+  num_bots[2] = 1u;
+  num_bots[3] = 0u;
+
+  // Bot render indirect args
+  num_bots[4] = 3 * 9; // vertex count per instance
+  num_bots[5] = num_bots[0]; // instance count
+  num_bots[6] = 0; // first vertex
+  num_bots[7] = 0; // first instance
+}

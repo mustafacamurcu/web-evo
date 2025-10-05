@@ -13,7 +13,7 @@
 		return;
 	}
 	vertex_datas[id.x].position = bots[id.x].position;
-	vertex_datas[id.x].direction = normalize(bots[id.x].velocity);
+	vertex_datas[id.x].direction = normalize(bots[id.x].direction);
 
   var senses_bitmask = 0u;
 	for (var i = 0u; i < 8; i = i + 1u) {

@@ -1,13 +1,20 @@
 @group(0) @binding(0) var<storage, read> bots: array<Bot>;
 @group(0) @binding(1) var<storage, read_write> scratchBuffer: array<Bot>;
+@group(0) @binding(2) var<storage, read_write> food_slots: array<FoodSlots>;
+@group(0) @binding(3) var<storage, read_write> food_next_slot: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read> bot_senses: array<BotSenses>;
 
 const PI = 3.14159265;
 
+const EAT_RANGE = 0.05;
+
+const BASE_ENERGY_COST = 0.01;
+
 const IDLE_ENERGY_COST = 5;
 const MOVE_ENERGY_COST = 1;
-const TURN_ENERGY_COST = 10;
+const TURN_ENERGY_COST = 100;
 
-const WALL_PENALTY = 5; // 5 degrees in radians
+const WALL_PENALTY = 50;
 
 const MOVE_SPEED = 0.0001;
 const TURN_SPEED = 5.0 * PI / 180.0; // 5 degrees in radians
@@ -36,42 +43,58 @@ const TURN_SPEED = 5.0 * PI / 180.0; // 5 degrees in radians
 	let decision = bots[id.x].decision;
 	if (decision < 4u) {
 		// Do nothing
-		bot.energy -= IDLE_ENERGY_COST;
 	}
 	else if (decision < 8u) {
 		// Move forward
-		let boost = f32(decision - 4u + 1u); // 1.0 to 4.0
-		let speed = MOVE_SPEED * boost; // 1x to 4x speed
-		bot.energy -= MOVE_ENERGY_COST * speed;
-		bot.position = bots[id.x].position + normalize(bots[id.x].velocity) * speed;
-		if (bot.position.x < -.95 || bot.position.x > .95 || bot.position.y < -.95 || bot.position.y > .95) {
-			bot.energy -= WALL_PENALTY; // extra penalty for hitting the wall
-		}
+		// let boost = f32(decision - 4u + 1u); // 1.0 to 4.0
+		// let speed = MOVE_SPEED * boost; // 1x to 4x speed
+		let speed = MOVE_SPEED;
+		bot.position = bots[id.x].position + normalize(bots[id.x].direction) * speed;
+		// if (bot.position.x < -.95 || bot.position.x > .95 || bot.position.y < -.95 || bot.position.y > .95) {
+		// 	bot.energy -= WALL_PENALTY; // extra penalty for hitting the wall
+		// }
 		bot.position.x = clamp(bot.position.x, -.95, .95);
 		bot.position.y = clamp(bot.position.y, -.95, .95);
 	}
-	else if (decision < 12u) {
+	else if (decision < 15u) {
 		// Turn left
-		let boost = f32(decision - 8u + 1u); // 1.0 to 4.0
-		let angle = TURN_SPEED * boost;
-		bot.energy -= TURN_ENERGY_COST * abs(angle);
+		let boost = f32(decision - 8u -3u); // -3.0 to +3.0
+		// let angle = TURN_SPEED * boost;
+		let angle = TURN_SPEED * boost / abs(boost);
 		let c = cos(angle);
 		let s = sin(angle);
-		let v = bot.velocity;
+		let v = bot.direction;
 		let new_v = vec2f(v.x * c - v.y * s, v.x * s + v.y * c);
-		bot.velocity = new_v;
+		bot.direction = new_v;
 	}
-	else if (decision < 16u) {
-		// Turn right
-		let boost = f32(decision - 12u + 1u); // 1.0 xs 4.0
-		let angle = -TURN_SPEED * boost;
-		bot.energy -= TURN_ENERGY_COST * abs(angle);
-		let c = cos(angle);
-		let s = sin(angle);
-		let v = bot.velocity;
-		let new_v = vec2f(v.x * c - v.y * s, v.x * s + v.y * c);
-		bot.velocity = new_v;
+	else if (decision < 16u) { // EAT
+		// find closest food
+		let senses = bot_senses[id.x];
+		let num_senses = INPUT_LAYER_SIZE / 2u;
+		var min_dist = EAT_RANGE;
+		var min_dist_food_id = 99999u;
+		for (var i = 0u; i < num_senses; i = i + 1u) {
+			let sense = senses.senses[i];
+			if (sense.type_id == 2u) { // food
+				if (sense.distance < min_dist) {
+					min_dist = sense.distance;
+					min_dist_food_id = sense.object_id;
+				}
+			}
+		}
+
+		// queue up to eat the closest food
+		if (min_dist_food_id != 99999u) {
+			// get next slot from food
+			let food_slot = atomicAdd(&food_next_slot[min_dist_food_id], 1u);
+			if (food_slot < 100u) {
+				// add bot id to food slot, food will decide if we can eat and give the energy
+				food_slots[min_dist_food_id].slots[food_slot] = id.x;
+			}
+		}
 	}
+
+	bot.energy -= BASE_ENERGY_COST; // baseline energy cost
 
 	// should die?
 	if (bot.energy <= 0.0) {
@@ -79,7 +102,7 @@ const TURN_SPEED = 5.0 * PI / 180.0; // 5 degrees in radians
 	} 
 	// should breed?
 	else if (bot.energy > 20.0 && bot.age > 5000) {
-		bot.die_stay_breed = 2;
+		bot.die_stay_breed = 1;
 	}
 	// stay alive
 	else {

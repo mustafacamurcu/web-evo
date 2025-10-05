@@ -1,5 +1,5 @@
 
-export function createRenderPipeline(device, code, context, verticesBufferStride, depthTexture) {
+export function createRenderPipeline(device, code, context, msaaTexture, verticesBufferStride, depthTexture) {
 	const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 	context.configure({
 		device,
@@ -79,6 +79,9 @@ export function createRenderPipeline(device, code, context, verticesBufferStride
 		primitive: {
 			topology: 'triangle-list',
 		},
+		multisample: {
+			count: 4, // Use 4x MSAA
+		},
 		depthStencil: {
 			format: "depth24plus", // Must match the depth texture format
 			depthWriteEnabled: true, // Enable writing to the depth buffer
@@ -89,7 +92,8 @@ export function createRenderPipeline(device, code, context, verticesBufferStride
 	const renderPassDescriptor = {
 		colorAttachments: [
 			{
-				// view: <- to be filled out when we render
+				// resolveTarget: <- to be filled out when we render
+				view: msaaTexture.createView(),
 				clearValue: [0.3, 0.3, 0.3, 1],
 				loadOp: 'clear',
 				storeOp: 'store',

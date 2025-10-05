@@ -1,11 +1,11 @@
-export function createBotSensePipeline(device, code, botsBuffer, botSensesBuffer, foodsBuffer) {
+export function createFoodStepPipeline(device, code, botsBuffer, foodsBuffer, foodSlotsBuffer, foodNextSlotBuffer) {
 	const module = device.createShaderModule({
-		label: 'bot sense compute module',
+		label: 'food stepper compute module',
 		code,
 	});
 
 	const pipeline = device.createComputePipeline({
-		label: 'bot sense compute pipeline',
+		label: 'food stepper compute pipeline',
 		layout: 'auto',
 		compute: {
 			module,
@@ -25,15 +25,21 @@ export function createBotSensePipeline(device, code, botsBuffer, botSensesBuffer
 			{
 				binding: 1,
 				resource: {
-					buffer: botSensesBuffer,
+					buffer: foodsBuffer,
 				},
 			},
 			{
 				binding: 2,
 				resource: {
-					buffer: foodsBuffer,
+					buffer: foodSlotsBuffer,
 				},
-			}
+			},
+			{
+				binding: 3,
+				resource: {
+					buffer: foodNextSlotBuffer,
+				},
+			},
 		],
 	});
 
