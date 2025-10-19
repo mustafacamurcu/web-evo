@@ -62,7 +62,8 @@ var<workgroup> out_idx: u32;
 
     if (dsb == 2 && out_idx+1 < arrayLength(&botsBuffer)) { // Breed
       // reset parent age
-      botsBuffer[out_idx].age = 0;
+      let energy_half = botsBuffer[out_idx].energy / 1.5;
+      botsBuffer[out_idx].energy = energy_half;
       
       // acquire new brain slot
       let brain_index = atomicSub(&brain_free_list_counter, 1u) - 1u;
@@ -74,11 +75,11 @@ var<workgroup> out_idx: u32;
       new_bot.id = bot.id + 1000000u;
       new_bot.die_stay_breed = 1u;
       new_bot.age = 0;
-      let position = bot.position + normalize(bot.direction) * .1;
-      new_bot.position = vec2f(clamp(position.x, -.95, .95), clamp(position.y, -.95, .95));
+      let position = rv2(bot.position+bot.direction+fract(f32(bot.age)/173.0)) * 2.0 - 1.0;
+      new_bot.position = position;
       new_bot.brain_id = child_brain_id;
       new_bot.color = bot.color;
-      new_bot.energy = 100;
+      new_bot.energy = energy_half;
       botsBuffer[out_idx + 1] = new_bot;
     }
   }

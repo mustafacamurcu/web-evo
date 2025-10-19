@@ -5,18 +5,8 @@ import {
 } from 'https://greggman.github.io/webgpu-utils/dist/2.x/webgpu-utils.module.js';
 import { createRenderPipeline } from './pipelines/render_pipeline.js';
 import { createFoodRenderPipeline } from './pipelines/food_render_pipeline.js';
-import { dumpBotsBuffer, dumpBufferFloat, dumpBufferInt, dumpBufferSense } from './utils.js';
+import { dumpBotsBuffer, dumpBufferFloat, dumpBufferInt, dumpBufferSense, fetchShaderCode } from './utils.js';
 import { setupSimulation } from './simulation_setup.js';
-
-// also imports structs.wgsl by default
-async function fetchShaderCode(url) {
-	const structs = await fetch('shaders/structs.wgsl');
-	const response = await fetch('shaders/' + url);
-	if (!response.ok) throw new Error('Failed to load shader');
-	const code = await response.text();
-	const structsCode = await structs.text();
-	return structsCode + '\n' + code;
-}
 
 async function main() {
 	// WebGPU setup
@@ -77,9 +67,8 @@ async function main() {
 	const { MAX_BOTS, MAX_FOOD } = constants;
 	const PASSES = 7; // sense, decide, step, prefix1, prefix2, prefix3, reaper
 	const QUERIES_PER_PASS = 2;
-	const REPEAT = 200;
+	const REPEAT = 100;
 	const TOTAL_QUERIES = PASSES * QUERIES_PER_PASS * REPEAT + 2 + 2; // +2 for vertices, +2 for render
-	const BOT_REFRESH_COUNT = 100; // how many bots to print out
 
 	// --- FPS & IPS display logic ---
 	let paused = false;
@@ -351,6 +340,15 @@ async function main() {
 		if (e.code === 'KeyH') {
 			if (statsElem) {
 				statsElem.style.display = (statsElem.style.display === 'none') ? '' : 'none';
+			}
+		}
+		if (e.code === 'KeyB') {
+			// Dump some bot data
+			let numBots = await dumpBufferInt(device, numBotsBuffer);
+			const bots = await dumpBotsBuffer(device, buffers.botsBuffer);
+			console.log('--- Bot Data ---');
+			for (let i = 0; i < numBots[0]; ++i) {
+				console.log(`Bot ${i}: Pos(${bots[i].position[0].toFixed(3)}, ${bots[i].position[1].toFixed(3)}) Energy: ${bots[i].energy.toFixed(2)} Age: ${bots[i].age} DSB: ${bots[i].die_stay_breed} ID: ${bots[i].id} decision: ${bots[i].decision}`);
 			}
 		}
 	});

@@ -2,10 +2,11 @@
 @group(0) @binding(1) var<storage, read_write> bot_senses: array<BotSenses>;
 @group(0) @binding(2) var<storage, read> foods: array<Food>;
 
-const N_RAYS = 8;
-const FOV = 3.14159265 / 2.0; // 90 degrees
+const N_RAYS = %N_RAYS%; // e.g., 8
+const FOV = %FOV%; // e.g., 3.14159 (180 degrees)
 const RAY_FOV = FOV / f32(N_RAYS);
-const VISION_DISTANCE = 0.1;
+const VISION_DISTANCE = %VISION_DISTANCE%; // e.g., 0.3
+const FOOD_COUNT = %FOOD_COUNT%; // e.g., 1000
 
 var<workgroup> thread_senses: array<BotSenses, 64>;
 
@@ -66,9 +67,9 @@ fn get_signed_angle(v1: vec2f, v2: vec2f) -> f32 {
 	}
 
 	// Each thread looks through their subset of food
-	let food_per_thread = 1000u/ 64u + 1u;
+	let food_per_thread = FOOD_COUNT/ 64u + 1u;
 	let food_begin = t_id * food_per_thread;
-	let food_end = min(food_begin + food_per_thread, 1000u);
+	let food_end = min(food_begin + food_per_thread, FOOD_COUNT);
 	for (var i = food_begin; i < food_end; i = i + 1u) {
 		let to_food = foods[i].position - pos;
 		let dist = length(to_food);

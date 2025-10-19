@@ -11,16 +11,14 @@ import { createNumBotsPipeline } from './pipelines/update_num_bots_pipeline.js';
 import { createBotSensePipeline } from './pipelines/bot_sense_pipeline.js';
 import { createBotVerticesPipeline } from './pipelines/bot_vertices_pipeline.js';
 import { creatRepopulatePipeline } from './pipelines/repopulate_pipeline.js';
-
-// Helper to fetch and combine WGSL code
-async function fetchShaderCode(url) {
-	const structs = await fetch('shaders/structs.wgsl');
-	const response = await fetch('shaders/' + url);
-	if (!response.ok) throw new Error('Failed to load shader');
-	const code = await response.text();
-	const structsCode = await structs.text();
-	return structsCode + '\n' + code;
-}
+import { fetchShaderCode } from './utils.js';
+import {
+	BOT_INITIAL_ENERGY as BOT_INITIAL_ENERGY_imp, FOOD_INITIAL_ENERGY,
+	MAX_BOTS as MAX_BOTS_imp,
+	MAX_FOOD as MAX_FOOD_imp,
+	FOOD_SLOT_COUNT as FOOD_SLOT_COUNT_imp,
+	INITIAL_BOT_COUNT as INITIAL_BOT_COUNT_imp
+} from './consts.js';
 
 function createStorageBuffer(device, storageDefinitionName, code, objectCount, usage, data = null) {
 	const defs = makeShaderDataDefinitions(code);
@@ -44,11 +42,11 @@ function createStorageBuffer(device, storageDefinitionName, code, objectCount, u
 export async function setupSimulation(device, options = {}) {
 
 	// Constants (can be parameterized)
-	const MAX_FOOD = options.MAX_FOOD || 1000;
-	const FOOD_SLOTS = options.FOOD_SLOTS || 100;
-	const MAX_BOTS = options.MAX_BOTS || 64 * 64 * 1;
-	const INITIAL_BOT_COUNT = options.INITIAL_BOT_COUNT || 700;
-	const BOT_INITIAL_ENERGY = options.BOT_INITIAL_ENERGY || 100;
+	const MAX_FOOD = options.MAX_FOOD ?? MAX_FOOD_imp;
+	const FOOD_SLOTS = options.FOOD_SLOTS ?? FOOD_SLOT_COUNT_imp;
+	const MAX_BOTS = options.MAX_BOTS ?? MAX_BOTS_imp;
+	const INITIAL_BOT_COUNT = options.INITIAL_BOT_COUNT ?? INITIAL_BOT_COUNT_imp;
+	const BOT_INITIAL_ENERGY = options.BOT_INITIAL_ENERGY ?? BOT_INITIAL_ENERGY_imp;
 
 	// Allow custom data for tests, fallback to defaults if not provided
 	let bot_data = options.bot_data;
@@ -59,7 +57,7 @@ export async function setupSimulation(device, options = {}) {
 				let bot = {
 					color: [Math.random(), Math.random(), Math.random(), 1.0],
 					position: [2 * (Math.random() - 0.5), 2 * (Math.random() - 0.5)],
-					direction: [0.00002 * (Math.random() - 0.5), 0.00002 * (Math.random() - 0.5)],
+					direction: [Math.random() - 0.5, Math.random() - 0.5],
 					die_stay_breed: 1,
 					energy: BOT_INITIAL_ENERGY,
 					id: i,
@@ -99,7 +97,7 @@ export async function setupSimulation(device, options = {}) {
 	let brain_free_list_data = options.brain_free_list_data;
 	if (!brain_free_list_data) {
 		brain_free_list_data = [];
-		for (let i = INITIAL_BOT_COUNT + 1; i < MAX_BOTS; ++i) {
+		for (let i = INITIAL_BOT_COUNT; i < MAX_BOTS; ++i) {
 			brain_free_list_data.push(i);
 		}
 	}
@@ -109,7 +107,7 @@ export async function setupSimulation(device, options = {}) {
 		for (let i = 0; i < MAX_FOOD; ++i) {
 			let food = {
 				position: [2 * (Math.random() - 0.5), 2 * (Math.random() - 0.5)],
-				energy: 20,
+				energy: FOOD_INITIAL_ENERGY,
 			};
 			food_data.push(food);
 		}

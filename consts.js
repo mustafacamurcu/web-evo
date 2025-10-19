@@ -1,0 +1,31 @@
+export const BOT_INITIAL_ENERGY = 50.0;
+export const FOOD_INITIAL_ENERGY = 100.0;
+export const MAX_BOTS = 4096;
+export const MAX_FOOD = 1000;
+export const FOOD_SLOT_COUNT = 100;
+export const INITIAL_BOT_COUNT = 2048;
+
+
+export const SHADER_CONSTANTS = {
+	'MAX_BOTS': '4096',
+	'VISION_DISTANCE': '0.1',
+	'WORKGROUP_SIZE': '64',
+	'INPUT_LAYER_SIZE': '16',
+	'MIDDLE_LAYER_SIZE': '32',
+	'OUTPUT_LAYER_SIZE': '16',
+	'MUTATION_RATE': '1000',
+	'N_RAYS': '8',
+	'FOV': '1.57079633', // 90 degrees in radians'
+	'FOOD_COUNT': '1000u',
+	'FOOD_SLOT_COUNT': '100u',
+
+	'EAT_RANGE': '0.05',
+	'BASE_ENERGY_COST': '1.01',
+	'MOVE_SPEED': '0.0001',
+	'TURN_SPEED': '0.0872665', // 5 degrees in radians
+	'BREED_ENERGY_THRESHOLD': '100.0',
+	'BITE_SIZE': '10.0',
+	'FOOD_ENERGY_REGEN': '1.0',
+	'MAX_FOOD_ENERGY': '100.0',
+	'BOT_INITIAL_ENERGY': String(BOT_INITIAL_ENERGY)
+};

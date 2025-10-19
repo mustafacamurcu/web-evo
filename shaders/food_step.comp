@@ -3,9 +3,11 @@
 @group(0) @binding(2) var<storage, read> food_slots: array<FoodSlots>;
 @group(0) @binding(3) var<storage, read_write> food_next_slot: array<atomic<u32>>;
 
-const BITE_SIZE = 1.0;
-const ENERGY_REGEN = 1.0;
-const MAX_FOOD_ENERGY = 100.0;
+const FOOD_COUNT = %FOOD_COUNT%;
+const FOOD_SLOT_COUNT = %FOOD_SLOT_COUNT%;
+const BITE_SIZE = %BITE_SIZE%;
+const ENERGY_REGEN = %FOOD_ENERGY_REGEN%;
+const MAX_FOOD_ENERGY = %MAX_FOOD_ENERGY%;
 
 // 1 thread per bot
 // 1 workgroup per 64 bots
@@ -14,17 +16,13 @@ const MAX_FOOD_ENERGY = 100.0;
 	@builtin(num_workgroups) counts: vec3u
 ) {
 	let food_id = global_id.x;
-	if (food_id >= 1000u) {
+	if (food_id >= FOOD_COUNT) {
 		return;
 	}
 
 	foods[food_id].energy = min(foods[food_id].energy + ENERGY_REGEN, MAX_FOOD_ENERGY);
 
-	let num_bots_queued = min(atomicLoad(&food_next_slot[food_id]), 100u);
-	if (num_bots_queued == 3u) {
-		// Test case: we expect 3 bots to be queued to eat this food
-		foods[food_id].energy = 3.0; // only 3 energy available to eat
-	}
+	let num_bots_queued = min(atomicLoad(&food_next_slot[food_id]), FOOD_SLOT_COUNT);
 	if (num_bots_queued == 0u) {
 		return; // no bots queued to eat this food
 	}

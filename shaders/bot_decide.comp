@@ -2,6 +2,8 @@
 @group(0) @binding(1) var<storage, read> bot_senses: array<BotSenses>;
 @group(0) @binding(2) var<storage, read_write> bots: array<Bot>; 
 
+const MUTATION_RATE = %MUTATION_RATE%;
+
 // Brain
 var<workgroup> w1: array<f32, 16 * 32>;
 var<workgroup> b1: array<f32, 32>;
@@ -132,12 +134,12 @@ var<workgroup> added_b2: array<f32, 16>;
 	let pos = bots[bot_id].position;
 	let index_seed = pos.x*100 - floor(pos.x)*100 + pos.y*100 - floor(pos.y)*100;
 	let normalized_index_seed = index_seed - floor(index_seed);
-	let random_index = u32(normalized_index_seed * f32(w1_size + b1_size + w2_size + b2_size) * 100); // *100 to decrease chance of mutation
+	let random_index = u32(normalized_index_seed * f32(w1_size + b1_size + w2_size + b2_size) * MUTATION_RATE); // *100 to decrease chance of mutation
 
 	// get random value
 	let value_seed = pos.x*1000 - floor(pos.x)*1000 + pos.y*1000 - floor(pos.y)*1000;
 	let normalized_value_seed = value_seed - floor(value_seed);
-	let random_value = (normalized_value_seed - 0.5); // small change between -0.05 and 0.05
+	let random_value = (normalized_value_seed - 0.5)*2.0; // -1.0 to +1.0
 	
 	if (random_index < w1_size) {
 		bot_brains[brain_id].W1[random_index] = random_value;

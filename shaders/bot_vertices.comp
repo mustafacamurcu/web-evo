@@ -8,7 +8,7 @@
 ) {
 	let bot_id = id.x;
 	if (bots[bot_id].die_stay_breed == 0u) {
-		vertex_datas[bot_id].position = vec2f(12.0, 100.0);
+		vertex_datas[bot_id].position = vec2f(100.0, 100.0);
 		vertex_datas[bot_id].direction = vec2f(1.0, 1.0);
 		return;
 	}

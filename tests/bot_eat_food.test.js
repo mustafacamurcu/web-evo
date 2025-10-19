@@ -134,5 +134,5 @@ test('Single bot eats single food', async () => {
 	// Bot should have gained energy
 	assertEqual(bots[0].energy > initialBotEnergy, true, 'Bot should have gained energy');
 	// Food should have no energy left
-	assertEqual(foods[0].energy, foodEnergy, 'Food should have gained and lost same energy');
+	assertEqual(foods[0].energy < foodEnergy, true, 'Food should have gained and lost same energy');
 });

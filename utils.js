@@ -1,3 +1,31 @@
+import { SHADER_CONSTANTS } from './consts.js';
+
+// Replace %keyword% patterns with constants
+function replaceShaderConstants(code) {
+	let result = code;
+	for (const [keyword, value] of Object.entries(SHADER_CONSTANTS)) {
+		const pattern = `%${keyword}%`;
+		result = result.replaceAll(pattern, value);
+	}
+	return result;
+}
+
+// also imports structs.wgsl by default
+export async function fetchShaderCode(url) {
+	const structs = await fetch('shaders/structs.wgsl');
+	const response = await fetch('shaders/' + url);
+	if (!response.ok) throw new Error('Failed to load shader');
+	const code = await response.text();
+	const structsCode = await structs.text();
+
+	// Apply constant replacement to both structs and shader code
+	const processedStructs = replaceShaderConstants(structsCode);
+	const processedCode = replaceShaderConstants(code);
+
+	return processedStructs + '\n' + processedCode;
+}
+
+
 
 class Bot {
 	constructor() {
@@ -9,8 +37,10 @@ class Bot {
 		this.energy = 0;
 		this.id = 0;
 		this.decision = 0;
+		this.brain_id = 0;
 	}
 }
+
 
 export async function dumpBotsBuffer(device, buffer) {
 	const stagingBuffer = device.createBuffer({
@@ -53,6 +83,7 @@ export async function dumpBotsBuffer(device, buffer) {
 		bot.energy = view.getFloat32(byteOffset + 40, true);
 		bot.id = view.getUint32(byteOffset + 44, true);
 		bot.decision = view.getUint32(byteOffset + 48, true);
+		bot.brain_id = view.getUint32(byteOffset + 52, true);
 
 		bots.push(bot);
 	}

@@ -7,6 +7,8 @@
 var<workgroup> new_brain_id: u32;
 var<workgroup> parent_brain_id: u32;
 
+const BOT_INITIAL_ENERGY = %BOT_INITIAL_ENERGY%;
+
 // 1 workgroup only
 @compute @workgroup_size(64) fn main(
   @builtin(local_invocation_id) local_id: vec3u,
@@ -15,32 +17,41 @@ var<workgroup> parent_brain_id: u32;
 ) {
 	let bot_count = num_bots[0];
 	let t_id = local_id.x;
-	if (bot_count == 0u || bot_count >= arrayLength(&botsBuffer) / 2u) {
-		return; // No bots or already at max population
-	}
-
-	if (t_id == 0u && workgroup_id.x == 0u) {
-		// Update bot count to double it
-		num_bots[0] = bot_count+1u;
+	if (bot_count >= 100u) {
+		return; // already at max population
 	}
 
 	if (t_id == 0u) {
+		// Update bot count to double it
+		num_bots[0] = bot_count+1u;
 		// Get a brain slot for the new bot
 		let index = atomicSub(&brain_free_list_counter, 1u) -1u;
 		new_brain_id = brain_free_list[index];
 		// pick a random parent bot to copy brain from
-		let parent_bot_index = u32(fract(botsBuffer[0].position.x) * f32(bot_count));
+		// find the oldest bot
+		var max_age = 0u;
+		var max_age_index = 0u;
+		for (var i = 0u; i < bot_count; i = i + 1u) {
+			let age = botsBuffer[i].age;
+			if (age > max_age) {
+				max_age = age;
+				max_age_index = i;
+			}
+		}
+		
+		let parent_bot_index = max_age_index;
 		let bot = botsBuffer[parent_bot_index];
 		parent_brain_id = bot.brain_id;
 		var new_bot: Bot = bot;
-		new_bot.id = bot.id + 1000000u;
+		new_bot.id = bot.id + 99900000u;
 		new_bot.die_stay_breed = 1u;
 		new_bot.age = 0;
-		let position = bot.position + normalize(bot.direction) * .1;
-		new_bot.position =  bot.position + normalize(bot.direction) * .1;
+		let position =  rv2(bot.position+bot.direction+fract(f32(bot.age)/173.3)) * 2.0 - 1.0;
+		new_bot.direction = normalize(rv2(bot.position-bot.direction+fract(f32(bot.age)/737.2)));
+		new_bot.position =  position;
 		new_bot.brain_id = new_brain_id;
 		new_bot.color = bot.color;
-		new_bot.energy = 100;
+		new_bot.energy = BOT_INITIAL_ENERGY;
 		botsBuffer[bot_count] = new_bot;
 	}
 
@@ -50,21 +61,26 @@ var<workgroup> parent_brain_id: u32;
 	var start = t_id * w1_chunk_size;
 	for (var i = 0u; i < w1_chunk_size; i = i + 1u) {
 			let idx = start + i;
-			bot_brains[new_brain_id].W1[idx] = bot_brains[parent_brain_id].W1[idx];
+			let seed = bot_brains[parent_brain_id].W1[idx];
+			bot_brains[new_brain_id].W1[idx] = seed;
 	}
 	let b1_size = 32u;
 	if (t_id < 32u) {
-		bot_brains[new_brain_id].B1[t_id] = bot_brains[parent_brain_id].B1[t_id];
+		let seed = bot_brains[parent_brain_id].B1[t_id];
+		bot_brains[new_brain_id].B1[t_id] = seed;
 	}
 	let w2_size = 32u * 16u;
 	let w2_chunk_size = w2_size / 64u;
 	start = t_id * w2_chunk_size;
 	for (var i = 0u; i < w2_chunk_size; i = i + 1u) {
 			let idx = start + i;
-			bot_brains[new_brain_id].W2[idx] = bot_brains[parent_brain_id].W2[idx];
+		let seed = bot_brains[parent_brain_id].W2[idx];
+			bot_brains[new_brain_id].W2[idx] = seed;
 	}
 	let b2_size = 16u;
 	if (t_id < 16u) {
-		bot_brains[new_brain_id].B2[t_id] = bot_brains[parent_brain_id].B2[t_id];
+		let seed = bot_brains[parent_brain_id].B2[t_id];
+		bot_brains[new_brain_id].B2[t_id] = seed;
 	}
+	
 }

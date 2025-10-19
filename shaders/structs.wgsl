@@ -50,3 +50,11 @@ struct BotSense {
 struct BotSenses {
   senses: array<BotSense, INPUT_LAYER_SIZE/2>
 }
+
+fn rf(st: vec2<f32>) -> f32 {
+    return fract(sin(dot(st, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+
+fn rv2(st: vec2<f32>) -> vec2<f32> {
+    return vec2f(rf(st + vec2f(1.0, 0.0)), rf(st + vec2f(0.0, 1.0)));
+}
